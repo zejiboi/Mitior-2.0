@@ -1,7 +1,7 @@
 Mitior OS (mOS) - System Requirements & Local Setup Specifications
 ==================================================================
 
-Mitior OS is designed to be fully self-contained, portable, and offline-capable. It can be run either as a local desktop system wrapper (giving you complete data sovereignty) or deployed as a highly scalably multi-tenant SaaS application on variables environments.
+Mitior OS is designed to be fully self-contained, portable, and offline-capable. It can be run either as a local desktop system wrapper (giving you complete data sovereignty) or deployed as a highly scalable multi-tenant SaaS application on various cloud environments.
 
 1. RUNTIME & SYSTEM PREREQUISITES
 ----------------------------------
@@ -34,7 +34,7 @@ Local launch scripts have been customized to execute instantly with zero technic
   - Installs required dependencies (only on the first run)
   - Compiles production weights into the /dist directory
   - Starts the local Express backend on http://localhost:3000
-  - Launces an independent Chrome/Edge app instance in clean standalone window mode
+  - Launches an independent Chrome/Edge app instance in clean standalone window mode
 
 * APPLE MAC/LINUX SYSTEM LAUNCHER:
   Double-click style or run the `launch_mac.command` executable script:
