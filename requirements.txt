@@ -1,0 +1,53 @@
+Mitior OS (mOS) - System Requirements & Local Setup Specifications
+==================================================================
+
+Mitior OS is designed to be fully self-contained, portable, and offline-capable. It can be run either as a local desktop system wrapper (giving you complete data sovereignty) or deployed as a highly scalably multi-tenant SaaS application on variables environments.
+
+1. RUNTIME & SYSTEM PREREQUISITES
+----------------------------------
+* Runtime Engine:   Node.js (v18.0.0 or higher is required; v20 LTS recommended)
+* Package Manager:  NPM (v9.0.0 or higher, bundled automatically with Node.js)
+* Operating System: Windows 10/11, macOS (12+), or Linux (Ubuntu/Debian)
+* Network Binding:  Exclusive control of Port 3000 (Localhost ingress mapping)
+* Web Browser:      Google Chrome, Microsoft Edge, Safari, or Mozilla Firefox
+  (Note: For a native app experience, Chrome/Edge can run it inside custom --app frames)
+
+2. CORE APPLICATION DEPENDENCIES
+---------------------------------
+* UI Framework:     React 19.0.1 (Single-Page App state management)
+* Build Bundler:    Vite 6.2.3 (Module loading and fast localized asset compilation)
+* Compilation Tool: Esbuild 0.25.0 (Server-side micro-bundle engine for ESM-to-CJS)
+* Styling Engine:   Tailwind CSS v4.1.14 (Clean fluid modular layout design values)
+* Animation Engine: Motion 12.23.24 (Smooth hardware-accelerated transitions)
+* Routing & APIs:   Express 4.21.2 (Micro-server routing backend for offline data API)
+* Icon Toolkit:     Lucide React (Pristine visual typography alignment symbols)
+* Charts & Proofs:  Recharts 3.8.1 (Dynamic performance indicators and data curves)
+* AI Companion:     @google/genai (Direct server-to-server companion mapping)
+
+3. LOCAL INSTALLATION & STARTUP INSTRUCTIONS
+---------------------------------------------
+Local launch scripts have been customized to execute instantly with zero technical skills:
+
+* WINDOWS SYSTEM LAUNCHER:
+  Simply double-click the `launch.bat` executable script at the root directory.
+  - Automatically verifies the local Node.js environment
+  - Installs required dependencies (only on the first run)
+  - Compiles production weights into the /dist directory
+  - Starts the local Express backend on http://localhost:3000
+  - Launces an independent Chrome/Edge app instance in clean standalone window mode
+
+* APPLE MAC/LINUX SYSTEM LAUNCHER:
+  Double-click style or run the `launch_mac.command` executable script:
+  $ chmod +x launch_mac.command
+  $ ./launch_mac.command
+  - Sets directory context, triggers npm install, builds distribution weights,
+    starts the server runtime, and automatically opens your browser.
+
+4. COMMERCIAL SAAS DEPLOYMENT CONFIGURATIONS
+---------------------------------------------
+For creators wishing to sell Mitior OS as a B2B SaaS:
+* Containerization: Easily wrapped in a Docker container bound to Port 3000
+* Hosting Services: Optimized for Cloud Run, Heroku, AWS ECS, or digital ocean droplets
+* Storage Options: Adheres to absolute privacy standard local key-values, and can be backed
+  up using the Settings -> JSON Backups workspace pipeline.
+* License Model: Automatically hides setup pricing tiers when a paid validation key or license state is registered in active store.
