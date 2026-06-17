@@ -287,11 +287,11 @@ export default function CheckoutPortal({
           clearInterval(interval);
           
           // Trigger the actual file download
-          const dummyContent = "Scalable OS Offline Executable Package Installer\nReceipt Reference: " + confirmedReceipt + "\nBuild Date: " + new Date().toISOString() + "\n\nThis zip contains:\n- Launch-ScalableOS.bat (Windows Launcher)\n- README.txt\n- package.json\n- server.js\n\nPlease retrieve instructions inside the README.txt to initialize on your workstation.";
+          const dummyContent = "Mitior OS Offline Executable Package Installer\nReceipt Reference: " + confirmedReceipt + "\nBuild Date: " + new Date().toISOString() + "\n\nThis zip contains:\n- Launch-MitiorOS.bat (Windows Launcher)\n- README.txt\n- package.json\n- server.js\n\nPlease retrieve instructions inside the README.txt to initialize on your workstation.";
           const element = document.createElement("a");
           const file = new Blob([dummyContent], {type: 'text/plain'});
           element.href = URL.createObjectURL(file);
-          element.download = "ScalableOS-Enterprise-Desktop-Workstation.zip";
+          element.download = "MitiorOS-Enterprise-Desktop-Workstation.zip";
           document.body.appendChild(element);
           element.click();
           document.body.removeChild(element);
@@ -317,7 +317,7 @@ export default function CheckoutPortal({
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-white rounded-3xl border border-[#e8e8ed] shadow-2xl max-w-4xl w-full grid grid-cols-1 md:grid-cols-12 overflow-hidden relative max-h-[90vh]"
+        className="bg-white rounded-3xl border border-[#e8e8ed] shadow-2xl max-w-4xl w-full grid grid-cols-1 md:grid-cols-12 overflow-y-auto md:overflow-hidden relative max-h-[95vh] md:max-h-[90vh]"
       >
         {isDownloadingApp ? (
           <div className="col-span-12 p-8 md:p-12 text-center space-y-6 flex flex-col items-center justify-center min-h-[460px] animate-fade-in font-sans">
@@ -360,17 +360,6 @@ export default function CheckoutPortal({
             {/* Sign out or Close Button absolute */}
             {isEnforced ? (
               <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-                <button
-                  onClick={() => {
-                    // Instantly unlock evaluation sandbox mode
-                    onPaymentSuccess('starter', 'DEV-SANDBOX-UNLOCKED-BYPASS');
-                  }}
-                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/50 rounded-full px-3 py-1.5 transition cursor-pointer flex items-center gap-1 text-xs font-bold font-sans"
-                  title="Unlock application features for evaluation"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-                  Bypass Code Gate
-                </button>
                 {onLogout && (
                   <button 
                     onClick={onLogout}
@@ -393,7 +382,7 @@ export default function CheckoutPortal({
             )}
 
         {/* LEFT COLUMN: Pricing tier selector & descriptions */}
-        <div className="md:col-span-5 bg-[#fbfbfd] border-r border-[#e8e8ed] p-6 space-y-6 flex flex-col justify-between overflow-y-auto">
+        <div className="md:col-span-5 bg-[#fbfbfd] border-r border-[#e8e8ed] p-6 space-y-6 flex flex-col justify-between md:overflow-y-auto">
           <div className="space-y-4">
             <div className="space-y-1">
               <span className="text-[10px] text-indigo-600 font-extrabold uppercase bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full w-fit block font-mono">
@@ -456,13 +445,25 @@ export default function CheckoutPortal({
         </div>
 
         {/* RIGHT COLUMN: Interactive Payment Terminal */}
-        <div className="md:col-span-7 p-6 space-y-6 flex flex-col justify-between overflow-y-auto">
+        <div className="md:col-span-7 p-6 space-y-6 flex flex-col justify-between md:overflow-y-auto">
           
           <div className="space-y-4">
             {/* Title / Heading */}
             <div className="space-y-1">
               <h3 className="font-bold text-[#1d1d1f] text-sm">Secure Payment Gateway checkout</h3>
               <p className="text-xs text-[#86868b]">Select your preferred checkout method to finalize active licensing.</p>
+            </div>
+
+            {/* Premium Selected Plan Summary */}
+            <div className="bg-neutral-50 border border-neutral-200/80 rounded-2xl p-4 flex justify-between items-center text-xs animate-fade-in shadow-3xs">
+              <div className="text-left space-y-0.5">
+                <span className="text-[9px] text-[#86868b] uppercase font-black tracking-wide block font-mono">SELECTED UPGRADE TIER</span>
+                <strong className="text-neutral-800 text-xs font-black">{plans.find(p => p.id === selectedPlan)?.name}</strong>
+              </div>
+              <div className="text-right space-y-0.5">
+                <span className="text-[9px] text-[#86868b] uppercase font-black tracking-wide block font-mono">KES AMOUNT DUE</span>
+                <strong className="text-indigo-600 text-sm font-black">KES {plans.find(p => p.id === selectedPlan)?.priceKes.toLocaleString()}</strong>
+              </div>
             </div>
 
             {/* Payment method selector tabs */}

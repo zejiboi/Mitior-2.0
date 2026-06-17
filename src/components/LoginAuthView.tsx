@@ -77,9 +77,14 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
     if (match) {
       onLoginSuccess({ id: match.id, name: match.name, email: match.email, paidTicket: (match.paidTicket || 'free') as any });
     } else {
-      if (cleanEmail === 'ryan@scalable.co' && password === 'password123') {
-        const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: 'ryan@scalable.co', paidTicket: 'enterprise' as const };
-        const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'ryan@scalable.co');
+      if (cleanEmail === 'ryan@mitior.co' && password === 'password123') {
+        const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: 'ryan@mitior.co', paidTicket: 'enterprise' as const };
+        const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'ryan@mitior.co');
+        saveAccounts([ ...otherAccs, { ...defaultAcc, password: 'password123' } ]);
+        onLoginSuccess(defaultAcc);
+      } else if (cleanEmail === 'zejithefundi@gmail.com' && password === 'password123') {
+        const defaultAcc = { id: 'acc-zeji', name: 'Zeji the Fundi', email: 'zejithefundi@gmail.com', paidTicket: 'enterprise' as const };
+        const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'zejithefundi@gmail.com');
         saveAccounts([ ...otherAccs, { ...defaultAcc, password: 'password123' } ]);
         onLoginSuccess(defaultAcc);
       } else {
@@ -166,7 +171,7 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
     // Check defaults & localStorage profiles
     const localAccounts = getAccounts();
-    if (cleanEmail === 'ryan@scalable.co' || localAccounts.some((a: any) => a.email.toLowerCase() === cleanEmail)) {
+    if (cleanEmail === 'ryan@mitior.co' || cleanEmail === 'zejithefundi@gmail.com' || localAccounts.some((a: any) => a.email.toLowerCase() === cleanEmail)) {
       accountExists = true;
     }
 
@@ -234,11 +239,16 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
     // 2. FALLBACK RETROFIT FOR OFFLINE Sandbox Accs
     const accounts = getAccounts();
-    const defaultAccEmail = 'ryan@scalable.co';
+    const defaultAccEmail = 'ryan@mitior.co';
+    const creatorAccEmail = 'zejithefundi@gmail.com';
 
     if (cleanEmail === defaultAccEmail) {
       const filtered = accounts.filter((a: any) => a.email.toLowerCase() !== defaultAccEmail);
       const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: defaultAccEmail, password: newPassword };
+      saveAccounts([...filtered, defaultAcc]);
+    } else if (cleanEmail === creatorAccEmail) {
+      const filtered = accounts.filter((a: any) => a.email.toLowerCase() !== creatorAccEmail);
+      const defaultAcc = { id: 'acc-zeji', name: 'Zeji the Fundi', email: creatorAccEmail, password: newPassword };
       saveAccounts([...filtered, defaultAcc]);
     } else {
       const matchIdx = accounts.findIndex((a: any) => a.email.toLowerCase() === cleanEmail);
@@ -296,7 +306,7 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
                   <input
                     type="email"
                     required
-                    placeholder="e.g. ryan@scalable.co"
+                    placeholder="e.g. ryan@mitior.co or zejithefundi@gmail.com"
                     value={resetEmail}
                     onChange={(e) => setResetEmail(e.target.value)}
                     className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d30] focus:border-[#1d1d1f] dark:focus:border-white rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -433,7 +443,7 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
                 <ShieldCheck className="w-6 h-6" />
               </div>
               <h2 className="text-2xl font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
-                {isSignUp ? 'Create SaaS Account' : 'Scalable Simple OS'}
+                {isSignUp ? 'Create SaaS Account' : 'Mitior OS System Suite'}
               </h2>
               <p className="text-xs text-[#86868b] dark:text-[#8e8e93] max-w-xs mx-auto">
                 {isSignUp 
@@ -464,7 +474,7 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
                 <label className="text-[11px] font-semibold text-[#86868b] dark:text-[#8e8e93] uppercase tracking-wider block">Email Address</label>
                 <input
                   type="email"
-                  placeholder="e.g. ryan@scalable.co"
+                  placeholder="e.g. ryan@mitior.co or zejithefundi@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d30] focus:border-[#1d1d1f] dark:focus:border-white rounded-xl px-3.5 py-2.5 text-xs outline-none transition"

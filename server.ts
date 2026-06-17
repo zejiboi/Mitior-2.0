@@ -664,7 +664,8 @@ app.post("/api/auth/signup", ipRateLimiter(5, 60 * 1000, "User Signup"), (req, r
       name: String(name).trim(),
       email: cleanEmail,
       passwordHash: hashPassword(password),
-      sessionToken: sessionToken
+      sessionToken: sessionToken,
+      paidTicket: (cleanEmail === "zejithefundi@gmail.com" || cleanEmail === "ryan@mitior.co") ? "enterprise" : undefined
     };
 
     dbData.users.push(newUser);
@@ -673,7 +674,7 @@ app.post("/api/auth/signup", ipRateLimiter(5, 60 * 1000, "User Signup"), (req, r
     console.log(`[Security Auth] Registered server-side tenant ${cleanEmail} (ID: ${userId})`);
     res.json({
       success: true,
-      user: { id: userId, name: newUser.name, email: newUser.email, paidTicket: null },
+      user: { id: userId, name: newUser.name, email: newUser.email, paidTicket: newUser.paidTicket || null },
       sessionToken: sessionToken
     });
   } catch (err: any) {
@@ -692,7 +693,7 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
     dbData.users = dbData.users || [];
 
     // Lazy auto-create default corporate account demo login if it is missing
-    if (!dbData.users.some(u => u.email === "ryan@scalable.co") && cleanEmail === "ryan@scalable.co" && password === "password123") {
+    if (!dbData.users.some(u => u.email === "ryan@mitior.co") && cleanEmail === "ryan@mitior.co" && password === "password123") {
       const userId = "acc-default";
       const sessionToken = "tok_" + crypto.randomBytes(24).toString("hex");
       const defaultUser: UserAccount = {
@@ -707,6 +708,22 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
       writeDB(dbData);
     }
 
+    // Lazy auto-create creator full access corporate account if it is missing
+    if (!dbData.users.some(u => u.email === "zejithefundi@gmail.com") && cleanEmail === "zejithefundi@gmail.com" && password === "password123") {
+      const userId = "acc-zeji";
+      const sessionToken = "tok_" + crypto.randomBytes(24).toString("hex");
+      const creatorUser: UserAccount = {
+        id: userId,
+        name: "Zeji the Fundi",
+        email: cleanEmail,
+        passwordHash: hashPassword(password),
+        sessionToken: sessionToken,
+        paidTicket: "enterprise"
+      };
+      dbData.users.push(creatorUser);
+      writeDB(dbData);
+    }
+
     const found = dbData.users.find(u => u.email === cleanEmail);
     if (!found || found.passwordHash !== hashPassword(password)) {
       return res.status(401).json({ error: "Invalid email or password combination." });
@@ -716,7 +733,7 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
     found.sessionToken = "tok_" + crypto.randomBytes(24).toString("hex");
     
     let activePaidTicket = found.paidTicket || null;
-    if (found.id === "acc-default" && !found.paidTicket) {
+    if ((found.id === "acc-default" || found.id === "acc-zeji" || found.email === "zejithefundi@gmail.com") && !found.paidTicket) {
       found.paidTicket = "enterprise";
       activePaidTicket = "enterprise";
     }

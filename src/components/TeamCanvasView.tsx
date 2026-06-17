@@ -222,7 +222,7 @@ export default function TeamCanvasView({
       const linkElement = document.createElement('a');
       linkElement.setAttribute('href', url);
       const dateStr = new Date().toISOString().slice(0, 10);
-      linkElement.setAttribute('download', `scalable_os_roster_backup_${dateStr}.json`);
+      linkElement.setAttribute('download', `mitior_os_roster_backup_${dateStr}.json`);
       linkElement.click();
       URL.revokeObjectURL(url);
     } catch (error) {

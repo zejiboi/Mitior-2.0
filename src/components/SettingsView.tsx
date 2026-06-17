@@ -833,7 +833,7 @@ export default function SettingsView({
     );
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `scalable-os-backup-${new Date().toISOString().slice(0,10)}.json`);
+    downloadAnchor.setAttribute("download", `mitior-os-backup-${new Date().toISOString().slice(0,10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -1103,7 +1103,7 @@ export default function SettingsView({
                           <h4 className="font-semibold text-sm text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center gap-1.5">
                             {currentUser?.name || 'Ryan Deiss'}
                           </h4>
-                          <p className="font-mono text-[10.5px] text-neutral-500">{currentUser?.email || 'ryan@scalable.co'}</p>
+                          <p className="font-mono text-[10.5px] text-neutral-500">{currentUser?.email || 'ryan@mitior.co'}</p>
                           
                           <div className="flex gap-2 items-center pt-2">
                             <span className="px-2.5 py-0.5 rounded-full text-[9.5px] font-bold bg-white dark:bg-neutral-850 text-neutral-600 dark:text-neutral-400 border border-neutral-200/50">
@@ -1159,7 +1159,7 @@ export default function SettingsView({
                               value={editEmail}
                               onChange={(e) => setEditEmail(e.target.value)}
                               className="w-full bg-[#f5f5f7] dark:bg-[#151516] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-medium rounded-xl px-3 py-2 outline-none focus:border-indigo-500 text-[#1d1d1f] dark:text-white"
-                              placeholder="ryan@scalable.co"
+                              placeholder="ryan@mitior.co"
                             />
                           </div>
                         </div>
@@ -1358,7 +1358,7 @@ export default function SettingsView({
                         const linkElement = document.createElement('a');
                         linkElement.setAttribute('href', url);
                         const dateStr = new Date().toISOString().slice(0, 10);
-                        linkElement.setAttribute('download', `scalable_os_roster_backup_${dateStr}.json`);
+                        linkElement.setAttribute('download', `mitior_os_roster_backup_${dateStr}.json`);
                         linkElement.click();
                         URL.revokeObjectURL(url);
                       } catch (error) {

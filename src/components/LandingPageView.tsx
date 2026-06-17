@@ -12,7 +12,8 @@ import {
   ArrowLeft,
   CheckCircle,
   HelpCircle,
-  AlertCircle
+  AlertCircle,
+  ChevronDown
 } from 'lucide-react';
 
 interface LandingPageViewProps {
@@ -56,14 +57,14 @@ Build Reference: SO-ENT-RELEASE-2026-DEV
 Data Residency Level: 100% PRIVATE SECURED
 Execution Module: Standalone Local Node
 
-Welcome to your Enterprise Local deployment of Scalable OS! Your system has
+Welcome to your Enterprise Local deployment of Mitior OS! Your system has
 been compiled to run client-side on your local hardware. This ensures absolute 
 data autonomy, zero unauthorized telemetry tracking, and total privacy.
 
 ----------------------------------------------------------------------
 PACKAGE INCLUDED FILES:
 ----------------------------------------------------------------------
-1. Launch-ScalableOS.bat - Windows Double-Click Launcher
+1. Launch-MitiorOS.bat - Windows Double-Click Launcher
 2. README.txt              - This documentation file
 3. package.json           - Node service configuration entry
 4. server.js              - Secure standalone routing engine
@@ -78,7 +79,7 @@ SYSTEM PREREQUISITES
 ----------------------------------------------------------------------
 GETTING STARTED (3-STEP INITIALIZATION)
 ----------------------------------------------------------------------
-Step 1: Extract this zip archive into any folder on your drive (e.g. C:\\ScalableOS).
+Step 1: Extract this zip archive into any folder on your drive (e.g. C:\\MitiorOS).
 
 Step 2: Install dependencies. Open your console (cmd/terminal) there, and run:
         
@@ -97,13 +98,13 @@ STANDALONE SECURE DESIGN
 - All engines, checklists, SOP templates and data cards will reside on your hardware.
 - No network signals are transmitted.
 
-Support details: support@scalable.co
+Support details: support@mitior.co
 ======================================================================`;
 
-    const batContent = `@echo off\ntitle Scalable OS Enterprise Local Host\necho ===================================================\necho     STARTING SCALABLE OS ENTERPRISE LOCAL SANDBOX\necho ===================================================\necho.\necho [INFO] Resolving system prerequisites...\nnode -v >nul 2>&1\nif %errorlevel% neq 0 (\n    echo [ERROR] Node.js is not installed or not in PATH!\n    echo [ERROR] Please install Node.js (v18+) from https://nodejs.org and try again.\n    pause\n    exit\n)\necho [OK] Node.js is present.\necho [INFO] Initializing standalone local server on port 3000...\nnpm run dev\npause`;
+    const batContent = `@echo off\ntitle Mitior OS Enterprise Local Host\necho ===================================================\necho     STARTING MITIOR OS ENTERPRISE LOCAL SANDBOX\necho ===================================================\necho.\necho [INFO] Resolving system prerequisites...\nnode -v >nul 2>&1\nif %errorlevel% neq 0 (\n    echo [ERROR] Node.js is not installed or not in PATH!\n    echo [ERROR] Please install Node.js (v18+) from https://nodejs.org and try again.\n    pause\n    exit\n)\necho [OK] Node.js is present.\necho [INFO] Initializing standalone local server on port 3000...\nnpm run dev\npause`;
 
     const packageJsonContent = `{
-  "name": "scalable-os-enterprise-local",
+  "name": "mitior-os-enterprise-local",
   "private": true,
   "version": "1.0.0",
   "scripts": {
@@ -115,19 +116,19 @@ Support details: support@scalable.co
   }
 }`;
 
-    const serverJsContent = `// Scalable OS Standalone Local Host\nconst express = require('express');\nconst fs = require('fs');\nconst path = require('path');\nconst app = express();\nconst PORT = 3000;\n\napp.use(express.json());\napp.use(express.static(__dirname));\n\napp.get('/api/health', (req, res) => {\n  res.json({ status: 'ok', localNode: true });\n});\n\napp.listen(PORT, '0.0.0.0', () => {\n  console.log('[Scalable OS] Standalone host running at http://localhost:' + PORT);\n});`;
+    const serverJsContent = `// Mitior OS Standalone Local Host\nconst express = require('express');\nconst fs = require('fs');\nconst path = require('path');\nconst app = express();\nconst PORT = 3000;\n\napp.use(express.json());\napp.use(express.static(__dirname));\n\napp.get('/api/health', (req, res) => {\n  res.json({ status: 'ok', localNode: true });\n});\n\napp.listen(PORT, '0.0.0.0', () => {\n  console.log('[Mitior OS] Standalone host running at http://localhost:' + PORT);\n});`;
 
     // Package contents combined into a downloadable layout
-    const zipInstallerContent = `--- SCALABLE OS ENTERPRISE LOCAL MANIFEST RAW CONTROLLER ---\\n\\n` + 
+    const zipInstallerContent = `--- MITIOR OS ENTERPRISE LOCAL MANIFEST RAW CONTROLLER ---\\n\\n` + 
       `### FILE 1: README.txt ###\\n${readmeContent}\\n\\n` +
-      `### FILE 2: Launch-ScalableOS.bat ###\\n${batContent}\\n\\n` +
+      `### FILE 2: Launch-MitiorOS.bat ###\\n${batContent}\\n\\n` +
       `### FILE 3: package.json ###\\n${packageJsonContent}\\n\\n` +
       `### FILE 4: server.js ###\\n${serverJsContent}\\n\\n`;
 
     const element = document.createElement("a");
     const file = new Blob([zipInstallerContent], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
-    element.download = "ScalableOS-Enterprise-Desktop-Workstation.zip";
+    element.download = "MitiorOS-Enterprise-Desktop-Workstation.zip";
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
@@ -152,7 +153,7 @@ Support details: support@scalable.co
           80: "🚀 [COMPILER] Minimizing client code resources & optimizing icons...",
           92: "🔒 [SHIELD] Activating offline operator authentication keys (sOS-Security)...",
           96: "✅ [SUCCESS] Local workstation client bundle compiled successfully!",
-          100: "📥 [SUCCESS] ScalableOS-Workstation-Enterprise.zip dispatched for local direct download!"
+          100: "📥 [SUCCESS] MitiorOS-Workstation-Enterprise.zip dispatched for local direct download!"
         };
 
         const matchingKey = Object.keys(logMap)
@@ -197,12 +198,12 @@ Support details: support@scalable.co
               <Compass className="w-4 h-4 text-white" />
             </div>
             <span className="font-extrabold text-sm tracking-tight text-[#1d1d1f] uppercase font-sans">
-              Scalable OS
+              Mitior OS
             </span>
           </div>
 
-          {/* Header Spreading Navigation & Tabs */}
-          <div className="flex items-center gap-4">
+          {/* Header Spreading Navigation & Tabs - Hidden on Mobile, Flex on Desktop */}
+          <div className="hidden sm:flex items-center gap-4">
             <button 
               onClick={() => setActiveTab('overview')}
               className={`text-xs font-bold px-4 py-2.5 rounded-xl transition duration-150 cursor-pointer hover:scale-105 active:scale-95 ${
@@ -227,10 +228,11 @@ Support details: support@scalable.co
             )}
           </div>
 
-          <div className="flex items-center gap-2.5">
+          {/* Desktop Auth Buttons - Hidden on Mobile */}
+          <div className="hidden sm:flex items-center gap-2.5">
             {currentUser ? (
               <div className="flex items-center gap-3">
-                <span className="hidden sm:inline text-xs text-[#86868b] font-semibold font-sans">
+                <span className="hidden md:inline text-xs text-[#86868b] font-semibold font-sans">
                   Active: <strong className="text-[#1d1d1f] font-bold">{currentUser.name}</strong>
                 </span>
                 <button 
@@ -267,6 +269,43 @@ Support details: support@scalable.co
                 </button>
               </>
             )}
+          </div>
+
+          {/* NEW Mobile Unified Dropdown Menu Selector - Eliminates Spacing Clutter on Small Screens */}
+          <div className="sm:hidden relative">
+            <select
+              value={activeTab}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'overview' || val === 'pricing') {
+                  setActiveTab(val as any);
+                } else if (val === 'login') {
+                  onLoginClick();
+                } else if (val === 'signup') {
+                  onSignUpClick();
+                } else if (val === 'getstarted') {
+                  onGetStarted();
+                }
+              }}
+              className="bg-[#f5f5f7] border border-[#e8e8ed] text-xs font-bold text-[#1d1d1f] rounded-xl py-2 pl-3.5 pr-8 outline-none appearance-none cursor-pointer max-w-[160px]"
+            >
+              <optgroup label="System Pages">
+                <option value="overview">Overview Page</option>
+                {!isPaid && <option value="pricing">Operating Pricing</option>}
+              </optgroup>
+              <optgroup label="System Access">
+                {currentUser ? (
+                  <option value="getstarted">Console ({currentUser.name})</option>
+                ) : (
+                  <>
+                    <option value="login">Log In Account</option>
+                    <option value="signup">Sign Up Account</option>
+                    <option value="getstarted">Get Started Free</option>
+                  </>
+                )}
+              </optgroup>
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-[#86868b] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
         </div>
       </nav>
@@ -340,7 +379,7 @@ Support details: support@scalable.co
                   Transparent Setup
                 </span>
                 <h3 className="text-3xl font-black text-[#1d1d1f] tracking-tight font-sans">
-                  Scalable OS Operating Pricing
+                  Mitior OS Operating Pricing
                 </h3>
                 <p className="text-sm font-semibold text-[#86868b] max-w-md mx-auto font-sans">
                   Flat, transparent operating fees. Sandbox your company playbook securely with local memory space.
@@ -492,7 +531,7 @@ Support details: support@scalable.co
                 {/* 4. Enterprise Local App */}
                 <div className="bg-white border-2 border-emerald-500 rounded-3xl p-5 space-y-5 relative overflow-hidden flex flex-col justify-between shadow-xs">
                   <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[8px] font-black px-2.5 py-1 rounded-bl-xl tracking-wider uppercase font-sans">
-                    Scalable Local
+                    Mitior Local
                   </div>
                   <div className="space-y-4 font-sans">
                     <div className="space-y-1">
@@ -534,7 +573,7 @@ Support details: support@scalable.co
                     className="w-full bg-emerald-500 hover:bg-emerald-600 hover:scale-102 active:scale-98 text-white py-2.5 rounded-xl text-xs font-extrabold transition-all duration-150 cursor-pointer mt-4 font-sans text-center"
                     id="pricing-pro-cta"
                   >
-                    Select Scalable Enterprise
+                    Select Mitior Enterprise
                   </button>
                 </div>
 
@@ -570,7 +609,7 @@ Support details: support@scalable.co
                   🔒 Standalone Node Delivery
                 </span>
                 <h3 className="text-3xl font-black text-[#1d1d1f] tracking-tight">
-                  Install on Device: Scalable OS Enterprise
+                  Install on Device: Mitior OS Enterprise
                 </h3>
                 <p className="text-xs font-medium text-[#86868b] mt-1 pr-6 max-w-3xl leading-relaxed">
                   Compile and package the direct-executable sandbox matching your local system specifications. Learn to configure clean local databases and standalone server ports directly from your private terminal.
@@ -605,7 +644,7 @@ Support details: support@scalable.co
                     </div>
 
                     <div className="p-4 flex-1 overflow-y-auto text-[11px] text-neutral-200 space-y-1.5 font-mono select-all scrollbar-thin">
-                      <p className="text-neutral-500 font-bold">// Scalable Operating System Sandbox Compiling Gateway</p>
+                      <p className="text-neutral-500 font-bold">// Mitior Operating System Sandbox Compiling Gateway</p>
                       <p className="text-neutral-300">Ready to package target hardware offline dependencies...</p>
                       
                       {compileLogs.length === 0 && !isCompiling && (
@@ -631,7 +670,7 @@ Support details: support@scalable.co
                             <span className="text-emerald-500">✓</span> BUILD SUCCESS: Standalone Workspace Bundled
                           </p>
                           <p className="text-[10px] text-neutral-400 leading-tight">
-                            Zip package "ScalableOS-Enterprise-Desktop-Workstation.zip" compiled and dispatched to local browser download pipelines.
+                            Zip package "MitiorOS-Enterprise-Desktop-Workstation.zip" compiled and dispatched to local browser download pipelines.
                           </p>
                         </div>
                       )}
@@ -726,7 +765,7 @@ Support details: support@scalable.co
                       <div className="flex gap-2.5 items-start text-xs border-b border-[#f5f5f7] pb-2.5">
                         <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                         <div>
-                          <code className="font-bold text-neutral-800 text-[11px] block">Launch-ScalableOS.bat</code>
+                          <code className="font-bold text-neutral-800 text-[11px] block">Launch-MitiorOS.bat</code>
                           <span className="text-neutral-500 text-[10px] leading-tight block mt-0.5">Windows desktop double-click runtime wrapper script. Avoids manual cmd typing.</span>
                         </div>
                       </div>
