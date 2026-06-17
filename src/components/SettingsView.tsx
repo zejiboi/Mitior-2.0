@@ -28,6 +28,7 @@ import {
   Award
 } from 'lucide-react';
 import { Playbook, TeamMember, ScorecardMetric, SprintPlan, ClarityCompass, ValueEngineNode, INITIAL_PLAYBOOKS, INITIAL_TEAM_MEMBERS, INITIAL_SCORECARD, INITIAL_SPRINT_PLAN, INITIAL_COMPASS } from '../types';
+import OnboardingWizard from './OnboardingWizard';
 
 // Fast & Safe compact MD5 implementation for Gravatar email extraction
 const computeMD5 = (str: string): string => {
@@ -248,7 +249,7 @@ export default function SettingsView({
 }: SettingsViewProps) {
   const [newProjName, setNewProjName] = useState('');
   const [newProjDesc, setNewProjDesc] = useState('');
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'profile' | 'projects' | 'import' | 'presets' | 'security' | 'backups' | 'faq' | 'billing' | 'desktop' | 'sync'>('profile');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'profile' | 'projects' | 'import' | 'presets' | 'security' | 'backups' | 'faq' | 'billing' | 'desktop' | 'sync' | 'academy'>('profile');
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
@@ -1003,8 +1004,9 @@ export default function SettingsView({
               { id: 'backups' as const, num: '6', label: 'Database Snapshots', icon: RefreshCw, visible: true, desc: 'Incremental server sync snapshots' },
               { id: 'sync' as const, num: '7', label: 'Create Sync Codes', icon: RefreshCw, visible: userRole === 'ceo', desc: 'Secure node sync keys' },
               { id: 'faq' as const, num: '8', label: 'Knowledge Base', icon: HelpCircle, visible: true, desc: 'Offline support & documentation' },
-              { id: 'billing' as const, num: '9', label: 'Billing & Payments', icon: CreditCard, visible: licenseTier === 'free', desc: 'Upgrade active evaluation tier' },
-              { id: 'desktop' as const, num: '10', label: 'Desktop Client Setup', icon: Laptop, visible: licenseTier === 'enterprise', desc: 'Native executable packaging' },
+              { id: 'academy' as const, num: '9', label: 'Video Academy', icon: Play, visible: true, desc: 'Watch onboarding tutorial videos (Reset status)' },
+              { id: 'billing' as const, num: '10', label: 'Billing & Payments', icon: CreditCard, visible: licenseTier === 'free', desc: 'Upgrade active evaluation tier' },
+              { id: 'desktop' as const, num: '11', label: 'Desktop Client Setup', icon: Laptop, visible: licenseTier === 'enterprise', desc: 'Native executable packaging' },
             ].filter(t => t.visible).map((tab) => {
               const Icon = tab.icon;
               const isActive = activeSettingsTab === tab.id;
@@ -1052,6 +1054,7 @@ export default function SettingsView({
               { id: 'backups' as const, label: 'Backups', icon: RefreshCw, visible: true },
               { id: 'sync' as const, label: 'Sync Codes', icon: RefreshCw, visible: userRole === 'ceo' },
               { id: 'faq' as const, label: 'FAQ', icon: HelpCircle, visible: true },
+              { id: 'academy' as const, label: 'Academy', icon: Play, visible: true },
               { id: 'billing' as const, label: 'Billing', icon: CreditCard, visible: licenseTier === 'free' },
               { id: 'desktop' as const, label: 'Desktop', icon: Laptop, visible: licenseTier === 'enterprise' },
             ].filter(t => t.visible).map((tab) => {
@@ -2192,6 +2195,41 @@ export default function SettingsView({
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {/* RENDER ONBOARDING VIDEO ACADEMY */}
+              {activeSettingsTab === 'academy' && (
+                <div className="space-y-4 animate-fade-in text-left">
+                  <div className="border-b border-neutral-100 dark:border-neutral-800 pb-2 mb-3">
+                    <h3 className="font-bold text-sm text-[#1d1d1f] dark:text-[#f5f5f7]">Mitior OS Academy</h3>
+                    <p className="text-[#86868b] dark:text-[#8e8e93] text-[10px] mt-0.5 font-sans">Review operational playbooks and structural lessons anytime.</p>
+                  </div>
+
+                  <div className="bg-neutral-50 dark:bg-[#1a1a1b] border border-neutral-100 dark:border-neutral-800 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-xs mb-1">
+                    <p className="text-neutral-600 dark:text-neutral-400 max-w-xl">
+                      If you dismissed the Academy, you can watch all video tutorial lectures inside this tab or completely reset the status to auto-display it on the home Overview dashboard.
+                    </p>
+                    <button
+                      onClick={() => {
+                        localStorage.removeItem('sOS_onboarding_wizard_done');
+                        alert("Academy auto-display status successfully reset! The tutorial walkthrough will now automatically display on your dashboard of the home overview page until closed.");
+                      }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] px-3.5 py-2.5 rounded-xl shrink-0 cursor-pointer transition active:scale-95"
+                    >
+                      Reset Auto-Display Status
+                    </button>
+                  </div>
+
+                  <OnboardingWizard
+                    teamMembers={teamMembers}
+                    playbooks={playbooks}
+                    onUpdateTeam={onUpdateTeamMembers}
+                    onUpdatePlaybooks={() => {}}
+                    onClose={() => {
+                      alert("You can review these video lectures anytime right from this settings page.");
+                    }}
+                  />
                 </div>
               )}
 

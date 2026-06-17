@@ -350,7 +350,10 @@ export default function DashboardOverview({
           playbooks={playbooks}
           onUpdateTeam={onUpdateTeam}
           onUpdatePlaybooks={onUpdatePlaybooks}
-          onClose={() => setShowOnboardingWizard(false)}
+          onClose={() => {
+            localStorage.setItem('sOS_onboarding_wizard_done', 'true');
+            setShowOnboardingWizard(false);
+          }}
         />
       )}
 
