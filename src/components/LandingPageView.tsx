@@ -20,11 +20,12 @@ interface LandingPageViewProps {
   onGetStarted: () => void;
   onLoginClick: () => void;
   onSignUpClick: () => void;
+  onAdminLoginClick?: () => void;
   currentUser: { id: string; name: string; email: string } | null;
   licenseTier?: 'free' | 'starter' | 'professional' | 'enterprise';
 }
 
-export default function LandingPageView({ onGetStarted, onLoginClick, onSignUpClick, currentUser, licenseTier }: LandingPageViewProps) {
+export default function LandingPageView({ onGetStarted, onLoginClick, onSignUpClick, onAdminLoginClick, currentUser, licenseTier }: LandingPageViewProps) {
   const isPaid = licenseTier && licenseTier !== 'free';
   // Navigation active tab: 'overview' shows the hero, 'pricing' shows the pricing section, 'install' shows enterprise install onboarding
   const [activeTab, setActiveTab] = useState<'overview' | 'pricing' | 'install'>('overview');
@@ -253,6 +254,16 @@ Support details: support@mitior.co
                 >
                   Log In
                 </button>
+                {onAdminLoginClick && (
+                  <button
+                    onClick={onAdminLoginClick}
+                    className="text-xs font-bold text-[#004b49] hover:scale-105 active:scale-95 transition px-3 py-1.5 bg-[#004b49]/10 border border-[#004b49]/20 rounded-xl cursor-pointer font-sans flex items-center gap-1"
+                    id="nav-admin-login-btn"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Admin Login</span>
+                  </button>
+                )}
                 <button 
                   onClick={onSignUpClick}
                   className="text-xs font-bold text-[#004b49] dark:text-[#76b0b1] hover:scale-105 active:scale-95 transition px-4 py-2 bg-[#004b49]/5 dark:bg-[#76b0b1]/10 border border-[#004b49]/15 dark:border-[#76b0b1]/20 rounded-xl cursor-pointer font-sans"
@@ -281,6 +292,8 @@ Support details: support@mitior.co
                   setActiveTab(val as any);
                 } else if (val === 'login') {
                   onLoginClick();
+                } else if (val === 'adminlogin' && onAdminLoginClick) {
+                  onAdminLoginClick();
                 } else if (val === 'signup') {
                   onSignUpClick();
                 } else if (val === 'getstarted') {
@@ -299,6 +312,7 @@ Support details: support@mitior.co
                 ) : (
                   <>
                     <option value="login">Log In Account</option>
+                    <option value="adminlogin">Admin Login</option>
                     <option value="signup">Sign Up Account</option>
                     <option value="getstarted">Get Started Free</option>
                   </>

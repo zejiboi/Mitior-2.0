@@ -27,8 +27,9 @@ import {
   CreditCard,
   Award
 } from 'lucide-react';
-import { Playbook, TeamMember, ScorecardMetric, SprintPlan, ClarityCompass, ValueEngineNode, INITIAL_PLAYBOOKS, INITIAL_TEAM_MEMBERS, INITIAL_SCORECARD, INITIAL_SPRINT_PLAN, INITIAL_COMPASS } from '../types';
+import { Playbook, TeamMember, ScorecardMetric, SprintPlan, ClarityCompass, ValueEngineNode, UserRole, INITIAL_PLAYBOOKS, INITIAL_TEAM_MEMBERS, INITIAL_SCORECARD, INITIAL_SPRINT_PLAN, INITIAL_COMPASS } from '../types';
 import OnboardingWizard from './OnboardingWizard';
+import SrsDocumentView from './SrsDocumentView';
 
 // Fast & Safe compact MD5 implementation for Gravatar email extraction
 const computeMD5 = (str: string): string => {
@@ -216,7 +217,8 @@ interface SettingsViewProps {
   onUpdateTeamMembers?: (members: TeamMember[]) => void;
   currentUser: { id: string; name: string; email: string } | null;
   onLogout: () => void;
-  userRole?: 'ceo' | 'employee';
+  userRole?: UserRole;
+  onUpdateUserRole?: (role: UserRole) => void;
   onOpenLauncherGuide?: () => void;
   licenseTier?: 'free' | 'starter' | 'professional' | 'enterprise';
   onOpenCheckout?: () => void;
@@ -241,6 +243,7 @@ export default function SettingsView({
   currentUser,
   onLogout,
   userRole = 'ceo',
+  onUpdateUserRole,
   onOpenLauncherGuide,
   licenseTier = 'free',
   onOpenCheckout,
@@ -249,9 +252,17 @@ export default function SettingsView({
 }: SettingsViewProps) {
   const [newProjName, setNewProjName] = useState('');
   const [newProjDesc, setNewProjDesc] = useState('');
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'profile' | 'projects' | 'import' | 'presets' | 'security' | 'backups' | 'faq' | 'billing' | 'desktop' | 'sync' | 'academy'>('profile');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'profile' | 'projects' | 'import' | 'presets' | 'security' | 'backups' | 'faq' | 'billing' | 'desktop' | 'sync' | 'academy' | 'srs'>('profile');
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [settingsBanner, setSettingsBanner] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
+
+  const showSettingsBanner = (text: string, type: 'info' | 'success' | 'error' = 'info') => {
+    setSettingsBanner({ type, text });
+    setTimeout(() => {
+      setSettingsBanner(prev => (prev?.text === text ? null : prev));
+    }, 4000);
+  };
 
   // --- SERVER PERSISTENT DATABASE BACKUP STATE ---
   const [serverBackups, setServerBackups] = useState<any[]>([]);
@@ -345,7 +356,15 @@ export default function SettingsView({
         body: JSON.stringify({
           projectId: targetProject.id,
           projectName: targetProject.name,
-          description: syncCodeDesc
+          description: syncCodeDesc,
+          workspaceData: {
+            playbooks,
+            teamMembers,
+            scorecard,
+            sprintPlan,
+            compass,
+            nodes
+          }
         })
       });
       const data = await res.json();
@@ -513,7 +532,9 @@ export default function SettingsView({
   const loadPaymentHistory = async () => {
     setHistoryLoading(true);
     try {
-      const res = await fetch("/api/checkout/history");
+      const res = await fetch("/api/checkout/history", {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setCheckoutHistory(data);
@@ -971,7 +992,27 @@ export default function SettingsView({
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in font-sans pb-12">
+    <div className="space-y-6 animate-fade-in font-sans pb-10">
+      {settingsBanner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl border text-xs font-semibold ${
+            settingsBanner.type === 'error'
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-800 dark:text-rose-300'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+          }`}
+        >
+          <span>{settingsBanner.text}</span>
+          <button
+            type="button"
+            onClick={() => setSettingsBanner(null)}
+            className="text-[10px] font-mono uppercase underline cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       
       {/* Settings Banner Header */}
       <div className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] p-6 rounded-2xl shadow-sm space-y-1 text-left">
@@ -1005,14 +1046,16 @@ export default function SettingsView({
               { id: 'sync' as const, num: '7', label: 'Create Sync Codes', icon: RefreshCw, visible: userRole === 'ceo', desc: 'Secure node sync keys' },
               { id: 'faq' as const, num: '8', label: 'Knowledge Base', icon: HelpCircle, visible: true, desc: 'Offline support & documentation' },
               { id: 'academy' as const, num: '9', label: 'Video Academy', icon: Play, visible: true, desc: 'Watch onboarding tutorial videos (Reset status)' },
-              { id: 'billing' as const, num: '10', label: 'Billing & Payments', icon: CreditCard, visible: licenseTier === 'free', desc: 'Upgrade active evaluation tier' },
-              { id: 'desktop' as const, num: '11', label: 'Desktop Client Setup', icon: Laptop, visible: licenseTier === 'enterprise', desc: 'Native executable packaging' },
+              { id: 'srs' as const, num: '10', label: '10. SRS Specification', icon: FileCode, visible: true, desc: 'IEEE 830 Software Requirements Spec' },
+              { id: 'billing' as const, num: '11', label: 'Billing & Payments', icon: CreditCard, visible: licenseTier === 'free', desc: 'Upgrade active evaluation tier' },
+              { id: 'desktop' as const, num: '12', label: 'Desktop Client Setup', icon: Laptop, visible: licenseTier === 'enterprise', desc: 'Native executable packaging' },
             ].filter(t => t.visible).map((tab) => {
               const Icon = tab.icon;
               const isActive = activeSettingsTab === tab.id;
               return (
                 <button
                   key={tab.id}
+                  id={`settings-tab-${tab.id}`}
                   onClick={() => setActiveSettingsTab(tab.id)}
                   className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl transition duration-150 cursor-pointer text-left select-none group relative ${
                     isActive
@@ -1025,7 +1068,7 @@ export default function SettingsView({
                       ? 'bg-indigo-600 text-white' 
                       : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500'
                   }`}>
-                    0{tab.num}
+                    {tab.num.length === 1 ? `0${tab.num}` : tab.num}
                   </div>
                   
                   <Icon className={`w-3.5 h-3.5 shrink-0 transition duration-150 ${
@@ -1044,7 +1087,7 @@ export default function SettingsView({
           </div>
 
           {/* Mobile Sliding Pill Container */}
-          <div className="block sm:hidden overflow-x-auto whitespace-nowrap scrollbar-none py-1 flex gap-1.5 scrollbar-thin">
+          <div className="block sm:hidden overflow-x-auto whitespace-nowrap no-scrollbar py-1 flex gap-1.5">
             {[
               { id: 'profile' as const, label: 'Profile', icon: Users, visible: true },
               { id: 'projects' as const, label: 'Spaces', icon: FolderGit2, visible: true },
@@ -1055,6 +1098,7 @@ export default function SettingsView({
               { id: 'sync' as const, label: 'Sync Codes', icon: RefreshCw, visible: userRole === 'ceo' },
               { id: 'faq' as const, label: 'FAQ', icon: HelpCircle, visible: true },
               { id: 'academy' as const, label: 'Academy', icon: Play, visible: true },
+              { id: 'srs' as const, label: '10. SRS Specification', icon: FileCode, visible: true },
               { id: 'billing' as const, label: 'Billing', icon: CreditCard, visible: licenseTier === 'free' },
               { id: 'desktop' as const, label: 'Desktop', icon: Laptop, visible: licenseTier === 'enterprise' },
             ].filter(t => t.visible).map((tab) => {
@@ -1179,7 +1223,7 @@ export default function SettingsView({
                             type="button"
                             onClick={() => {
                               if (!editName.trim() || !editEmail.trim()) {
-                                alert("Operator configuration fields cannot be left empty.");
+                                showSettingsBanner("Operator configuration fields cannot be left empty.", "error");
                                 return;
                               }
                               if (onUpdateCurrentUser) {
@@ -1201,6 +1245,43 @@ export default function SettingsView({
                       <p className="text-emerald-600 text-[10.5px] font-bold mt-1 bg-emerald-50 dark:bg-emerald-950/20 p-2 rounded-lg border border-emerald-100/40">
                         ✓ Operational profile and workspace owner identity synced successfully.
                       </p>
+                    )}
+
+                    {/* Four-Role RBAC Selector ([FR-SEC-03]) */}
+                    {onUpdateUserRole && (
+                      <div className="pt-3 border-t border-neutral-200/60 dark:border-neutral-800 space-y-2">
+                        <span className="text-[10px] font-mono uppercase font-bold text-[#86868b] block">
+                          Active Governance Role (IEEE 830 RBAC)
+                        </span>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {([
+                            { id: 'ceo', label: 'CEO (Admin)' },
+                            { id: 'fundi', label: 'Fundi (Systems)' },
+                            { id: 'operator', label: 'Operator (Staff)' },
+                            { id: 'auditor', label: 'Auditor (Read-Only)' }
+                          ] as const).map((r) => {
+                            const normalizedCurrent = userRole === 'employee' ? 'operator' : userRole;
+                            const isSelected = normalizedCurrent === r.id;
+                            return (
+                              <button
+                                key={r.id}
+                                type="button"
+                                onClick={() => {
+                                  onUpdateUserRole(r.id);
+                                  showSettingsBanner(`Workspace governance role switched to ${r.label}.`, 'success');
+                                }}
+                                className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-[#1d1d1f] text-white border-[#1d1d1f]'
+                                    : 'bg-white dark:bg-[#112226] text-[#86868b] border-[#e8e8ed] hover:text-[#1d1d1f]'
+                                }`}
+                              >
+                                {r.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     )}
                   </div>
 
@@ -1516,7 +1597,7 @@ export default function SettingsView({
 "Rachel Green","Operations Executive","Ryan Deiss","Maintain client satisfaction;Manage billing systems",false
 "Monica Geller","Fulfillment Director","Ryan Deiss","Audit shipment compliance;Draft standard playbooks",false`;
                         navigator.clipboard.writeText(csvContent);
-                        alert("Structured CSV copied to clipboard!");
+                        showSettingsBanner("Structured CSV copied to clipboard!", "success");
                       }}
                       className="bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 px-3 py-1 text-[10px] font-bold rounded-lg transition cursor-pointer inline-flex items-center gap-1"
                     >
@@ -1848,7 +1929,7 @@ export default function SettingsView({
                             type="button"
                             onClick={() => {
                               if (licenseTier === 'free') {
-                                alert("Export pipeline is restricted for Free Tier validation profiles. Please upgrade to unleash full operational JSON exports.");
+                                showSettingsBanner("Export pipeline is restricted for Free Tier validation profiles. Please upgrade to unleash full operational JSON exports.", "error");
                                 return;
                               }
                               exportSystemData();
@@ -2103,7 +2184,7 @@ export default function SettingsView({
                                   type="button"
                                   onClick={() => {
                                     navigator.clipboard.writeText(item.code);
-                                    alert(`Copied sync code to clipboard: ${item.code}`);
+                                    showSettingsBanner(`Copied sync code to clipboard: ${item.code}`, "success");
                                   }}
                                   className="text-[10px] text-indigo-600 hover:underline font-bold shrink-0"
                                 >
@@ -2213,7 +2294,7 @@ export default function SettingsView({
                     <button
                       onClick={() => {
                         localStorage.removeItem('sOS_onboarding_wizard_done');
-                        alert("Academy auto-display status successfully reset! The tutorial walkthrough will now automatically display on your dashboard of the home overview page until closed.");
+                        showSettingsBanner("Academy auto-display status successfully reset! The tutorial walkthrough will now automatically display on your dashboard of the home overview page until closed.", "success");
                       }}
                       className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] px-3.5 py-2.5 rounded-xl shrink-0 cursor-pointer transition active:scale-95"
                     >
@@ -2227,9 +2308,16 @@ export default function SettingsView({
                     onUpdateTeam={onUpdateTeamMembers}
                     onUpdatePlaybooks={() => {}}
                     onClose={() => {
-                      alert("You can review these video lectures anytime right from this settings page.");
+                      showSettingsBanner("You can review these video lectures anytime right from this settings page.", "info");
                     }}
                   />
+                </div>
+              )}
+
+              {/* RENDER 10. SRS SPECIFICATION VIEWER */}
+              {activeSettingsTab === 'srs' && (
+                <div className="animate-fade-in text-left">
+                  <SrsDocumentView compact />
                 </div>
               )}
 

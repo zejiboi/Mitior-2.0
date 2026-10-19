@@ -21,7 +21,7 @@ import {
   Undo,
   Redo
 } from 'lucide-react';
-import { Playbook, TeamMember, ValueEngineNode } from '../types';
+import { Playbook, TeamMember, ValueEngineNode, UserRole } from '../types';
 
 interface PlaybookFolderViewProps {
   playbooks: Playbook[];
@@ -30,7 +30,7 @@ interface PlaybookFolderViewProps {
   onUpdatePlaybooks: (updated: Playbook[]) => void;
   selectedPlaybookId: string | null;
   setSelectedPlaybookId: (id: string | null) => void;
-  userRole?: 'ceo' | 'employee';
+  userRole?: UserRole;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -88,7 +88,7 @@ export default function PlaybookFolderView({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canUndo, canRedo, onUndo, onRedo]);
 
-  const isEmployee = userRole === 'employee';
+  const isEmployee = userRole === 'employee' || userRole === 'operator' || userRole === 'auditor';
 
   // Buffer state for edits
   const [editTitle, setEditTitle] = useState('');

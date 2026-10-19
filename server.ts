@@ -4,6 +4,12 @@ import dotenv from "dotenv";
 import fs from "fs";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
+import {
+  processMitiorAssistantQuery,
+  AssistantUserMemory,
+  AssistantChatMessage,
+  AssistantRuntimeContext
+} from "./src/assistantEngine";
 
 // Load environment variables
 dotenv.config();
@@ -20,11 +26,12 @@ function ipRateLimiter(maxRequests: number, windowMs: number, operationLabel: st
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const rawIp = req.ip || req.headers["x-forwarded-for"] || "unknown-client";
     const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    const limiterKey = `${ip}:${operationLabel}`;
     const now = Date.now();
-    const tracker = rateLimitsLog.get(ip);
+    const tracker = rateLimitsLog.get(limiterKey);
 
     if (!tracker || now > tracker.resetTime) {
-      rateLimitsLog.set(ip, { count: 1, resetTime: now + windowMs });
+      rateLimitsLog.set(limiterKey, { count: 1, resetTime: now + windowMs });
       return next();
     }
 
@@ -40,11 +47,16 @@ function ipRateLimiter(maxRequests: number, windowMs: number, operationLabel: st
   };
 }
 
-const app = express();
-app.use(express.json());
+export const app = express();
+app.use(express.json({ limit: "6mb" }));
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const DB_FILE = path.join(process.cwd(), "server_db.json");
+function getDbFilePath(): string {
+  return process.env.MITIOR_DB_PATH || path.join(process.cwd(), "server_db.json");
+}
+
+// In-memory recovery token store for secure password reset verification
+const recoveryCodesMap = new Map<string, { code: string; expiresAt: number }>();
 
 // Define Core Mitior OS Storage Schemas
 interface UserAccount {
@@ -90,6 +102,7 @@ interface SyncCodeRecord {
   projectName: string;
   description: string;
   createdAt: number;
+  workspaceData?: any;
 }
 
 interface DatabaseSchema {
@@ -98,32 +111,36 @@ interface DatabaseSchema {
   pins: UserPin[];
   users?: UserAccount[];
   syncCodes?: SyncCodeRecord[];
+  assistantMemories?: Record<string, AssistantUserMemory>;
 }
 
 // Database Initialization & CRUD Engines
 function initDB() {
-  if (!fs.existsSync(DB_FILE)) {
+  const dbPath = getDbFilePath();
+  if (!fs.existsSync(dbPath)) {
     const defaultDB: DatabaseSchema = {
       backups: [],
       payments: [],
-      pins: []
+      pins: [],
+      assistantMemories: {}
     };
-    fs.writeFileSync(DB_FILE, JSON.stringify(defaultDB, null, 2), "utf-8");
-    console.log("[Mitior DB] Successfully generated a new persistent database at server_db.json");
+    fs.writeFileSync(dbPath, JSON.stringify(defaultDB, null, 2), "utf-8");
+    console.log(`[Mitior DB] Successfully generated a new persistent database at ${path.basename(dbPath)}`);
   }
 }
 
 function readDB(): DatabaseSchema {
   try {
     initDB();
-    const raw = fs.readFileSync(DB_FILE, "utf-8");
+    const raw = fs.readFileSync(getDbFilePath(), "utf-8");
     const data = JSON.parse(raw);
     data.users = data.users || [];
     data.syncCodes = data.syncCodes || [];
+    data.assistantMemories = data.assistantMemories || {};
     return data;
   } catch (err) {
     console.error("[Mitior DB Error] Failed to read database, defaulting to empty arrays:", errStr(err));
-    return { backups: [], payments: [], pins: [], users: [], syncCodes: [] };
+    return { backups: [], payments: [], pins: [], users: [], syncCodes: [], assistantMemories: {} };
   }
 }
 
@@ -131,7 +148,8 @@ function writeDB(data: DatabaseSchema) {
   try {
     data.users = data.users || [];
     data.syncCodes = data.syncCodes || [];
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+    data.assistantMemories = data.assistantMemories || {};
+    fs.writeFileSync(getDbFilePath(), JSON.stringify(data, null, 2), "utf-8");
   } catch (err) {
     console.error("[Mitior DB Error] Failed writing database cells to disk:", errStr(err));
   }
@@ -141,8 +159,43 @@ function errStr(e: any): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password).digest("hex");
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const digest = crypto.createHash("sha256").update(`${salt}:${password}`).digest("hex");
+  return `${salt}:${digest}`;
+}
+
+export function verifyPassword(password: string, storedHash: string): boolean {
+  if (!storedHash) return false;
+  if (storedHash.includes(":")) {
+    const [salt, expectedDigest] = storedHash.split(":");
+    const actualDigest = crypto.createHash("sha256").update(`${salt}:${password}`).digest("hex");
+    if (actualDigest.length !== expectedDigest.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(actualDigest, "hex"), Buffer.from(expectedDigest, "hex"));
+  }
+  // Backward-compatible verification for legacy unsalted SHA-256 hashes
+  const legacyDigest = crypto.createHash("sha256").update(password).digest("hex");
+  if (legacyDigest.length !== storedHash.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(legacyDigest, "hex"), Buffer.from(storedHash, "hex"));
+}
+
+export function hashPin(pin: string): string {
+  const salt = crypto.randomBytes(12).toString("hex");
+  const digest = crypto.createHash("sha256").update(`${salt}:${pin}`).digest("hex");
+  return `${salt}:${digest}`;
+}
+
+export function verifyPin(pin: string, storedPinHash: string): boolean {
+  const cleanPin = String(pin).trim();
+  if (!storedPinHash) return false;
+  if (storedPinHash.includes(":")) {
+    const [salt, expectedDigest] = storedPinHash.split(":");
+    const actualDigest = crypto.createHash("sha256").update(`${salt}:${cleanPin}`).digest("hex");
+    if (actualDigest.length !== expectedDigest.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(actualDigest, "hex"), Buffer.from(expectedDigest, "hex"));
+  }
+  // Backward-compatible verification for legacy 4-digit cleartext PINs
+  return storedPinHash === cleanPin;
 }
 
 function checkAuth(req: express.Request, userIdNeeded?: string): string | null {
@@ -222,6 +275,20 @@ const paymentSessions = new Map<string, PaymentSession>();
 // API: Health probe
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", time: new Date().toISOString() });
+});
+
+// API: Serve IEEE 830 Software Requirements Specification (/SRS.md)
+app.get("/api/srs", (req, res) => {
+  try {
+    const srsPath = path.join(process.cwd(), "SRS.md");
+    if (fs.existsSync(srsPath)) {
+      const markdown = fs.readFileSync(srsPath, "utf-8");
+      return res.json({ success: true, version: "2.0.0", markdown });
+    }
+    return res.status(404).json({ error: "SRS.md not found on disk." });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to read SRS.md: " + errStr(err) });
+  }
 });
 
 // A. SECURITY / ENDPOINT KEYS EXPOSURE WARNING
@@ -725,8 +792,13 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
     }
 
     const found = dbData.users.find(u => u.email === cleanEmail);
-    if (!found || found.passwordHash !== hashPassword(password)) {
+    if (!found || !verifyPassword(String(password), found.passwordHash)) {
       return res.status(401).json({ error: "Invalid email or password combination." });
+    }
+
+    // Upgrade legacy unsalted password hash to salted SHA-256 on successful login
+    if (!found.passwordHash.includes(":")) {
+      found.passwordHash = hashPassword(String(password));
     }
 
     // Refresh of token on clean authentication
@@ -750,9 +822,31 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
   }
 });
 
+app.post("/api/auth/verify-code", ipRateLimiter(8, 60 * 1000, "Recovery Code Dispatch"), (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email address is required to generate a recovery code." });
+    }
+    const cleanEmail = String(email).trim().toLowerCase();
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    recoveryCodesMap.set(cleanEmail, {
+      code,
+      expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes validity
+    });
+    res.json({
+      success: true,
+      recoveryCode: code,
+      expiresInSeconds: 600
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Recovery code dispatch exception: " + errStr(err) });
+  }
+});
+
 app.post("/api/auth/reset-password", ipRateLimiter(5, 60 * 1000, "Password Reset"), (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, recoveryCode, resetToken } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "Email and new password are required." });
     }
@@ -768,9 +862,26 @@ app.post("/api/auth/reset-password", ipRateLimiter(5, 60 * 1000, "Password Reset
       return res.status(404).json({ error: "No account found associated with this email address." });
     }
 
-    found.passwordHash = hashPassword(password);
+    // SECURITY GUARD: Require either an active Bearer session for this account OR a valid recoveryCode
+    const authenticatedUserId = checkAuth(req, found.id);
+    const providedCode = String(recoveryCode || resetToken || "").trim();
+    const storedRecovery = recoveryCodesMap.get(cleanEmail);
+    const hasValidRecoveryCode =
+      !!providedCode &&
+      !!storedRecovery &&
+      storedRecovery.expiresAt >= Date.now() &&
+      storedRecovery.code === providedCode;
+
+    if (!authenticatedUserId && !hasValidRecoveryCode) {
+      return res.status(401).json({
+        error: "Access Denied: Password reset requires a verified recovery code or an active authenticated session."
+      });
+    }
+
+    found.passwordHash = hashPassword(String(password));
     // Revoke current session token to enforce re-login
     found.sessionToken = "";
+    recoveryCodesMap.delete(cleanEmail);
     writeDB(dbData);
 
     console.log(`[Security Auth] Successfully reset password for server-side user ${cleanEmail}`);
@@ -799,7 +910,7 @@ app.get("/api/sync-codes", requireLoggedInUser, (req, res) => {
 app.post("/api/sync-codes/create", ipRateLimiter(20, 60 * 1000, "Create Sync Code"), requireLoggedInUser, (req, res) => {
   try {
     const creatorUserId = (req as any).userId;
-    const { projectId, projectName, description } = req.body;
+    const { projectId, projectName, description, workspaceData } = req.body;
     if (!projectId || !projectName) {
       return res.status(400).json({ error: "Project configuration is required." });
     }
@@ -819,7 +930,8 @@ app.post("/api/sync-codes/create", ipRateLimiter(20, 60 * 1000, "Create Sync Cod
       projectId: String(projectId),
       projectName: String(projectName),
       description: cleanDesc,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      workspaceData: workspaceData || undefined
     };
 
     dbData.syncCodes.push(newRecord);
@@ -876,7 +988,8 @@ app.get("/api/sync-codes/verify/:code", (req, res) => {
       projectName: foundCode.projectName,
       projectId: foundCode.projectId,
       creatorName,
-      description: foundCode.description
+      description: foundCode.description,
+      workspaceData: foundCode.workspaceData || null
     });
   } catch (err: any) {
     res.status(500).json({ error: "Failed to verify sync code: " + err.message });
@@ -1058,11 +1171,12 @@ app.post("/api/security/pin/set", requireSaaSUser, (req, res) => {
     }
     
     const dbData = readDB();
+    const saltedPinHash = hashPin(cleanPin);
     const pinIndex = dbData.pins.findIndex(p => p.userId === userId);
     if (pinIndex !== -1) {
-      dbData.pins[pinIndex].pinHash = cleanPin;
+      dbData.pins[pinIndex].pinHash = saltedPinHash;
     } else {
-      dbData.pins.push({ userId, pinHash: cleanPin });
+      dbData.pins.push({ userId, pinHash: saltedPinHash });
     }
     writeDB(dbData);
     res.json({ success: true, message: "Credential locker synchronized." });
@@ -1090,7 +1204,7 @@ app.post("/api/security/pin/verify", requireSaaSUser, (req, res) => {
       // PIN not active yet
       return res.json({ success: true, notConfigured: true });
     }
-    if (record.pinHash === String(pin).trim()) {
+    if (verifyPin(String(pin || ""), record.pinHash)) {
       return res.json({ success: true });
     } else {
       return res.status(401).json({ success: false, error: "Authentication failed: Unmatched PIN code." });
@@ -1118,7 +1232,7 @@ app.post("/api/security/pin/remove", requireSaaSUser, (req, res) => {
     if (pinIndex === -1) {
       return res.json({ success: true, message: "Security guard is already inactive." });
     }
-    if (dbData.pins[pinIndex].pinHash !== String(pin).trim()) {
+    if (!verifyPin(String(pin || ""), dbData.pins[pinIndex].pinHash)) {
       return res.status(401).json({ error: "Wrong PIN: Authorization rejected." });
     }
     
@@ -1130,12 +1244,198 @@ app.post("/api/security/pin/remove", requireSaaSUser, (req, res) => {
   }
 });
 
+// J. GROUNDED MITIOR OS HELPER BOT & PERSISTENT USER MEMORY ENDPOINTS
+function resolveAssistantMemoryKey(req: express.Request): {
+  userId: string;
+  userName: string;
+} {
+  const authedId = checkAuth(req);
+  const dbData = readDB();
+  if (authedId) {
+    const foundUser = dbData.users?.find(u => u.id === authedId);
+    return {
+      userId: authedId,
+      userName: foundUser?.name || "Authenticated Operator"
+    };
+  }
+  const fallbackId = String(
+    req.body?.context?.userId || req.query?.userId || "admin-portal-session"
+  ).trim();
+  const fallbackName = String(
+    req.body?.context?.userName || req.query?.userName || "Administrator"
+  ).trim();
+  return {
+    userId: fallbackId || "admin-portal-session",
+    userName: fallbackName || "Administrator"
+  };
+}
+
+app.get("/api/assistant/memory", (req, res) => {
+  try {
+    const { userId, userName } = resolveAssistantMemoryKey(req);
+    const dbData = readDB();
+    dbData.assistantMemories = dbData.assistantMemories || {};
+
+    const existing = dbData.assistantMemories[userId] || {
+      userId,
+      userName,
+      userRole: "ceo",
+      notes: [],
+      messages: [],
+      updatedAt: Date.now()
+    };
+
+    return res.json({
+      success: true,
+      memory: existing
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to read assistant memory: " + errStr(err) });
+  }
+});
+
+app.post("/api/assistant/chat", ipRateLimiter(40, 60 * 1000, "Helper Bot Chat"), (req, res) => {
+  try {
+    const { message, context } = req.body || {};
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ error: "Chat message cannot be empty." });
+    }
+
+    const { userId, userName } = resolveAssistantMemoryKey(req);
+    const dbData = readDB();
+    dbData.assistantMemories = dbData.assistantMemories || {};
+
+    const runtimeContext: AssistantRuntimeContext = {
+      ...(context || {}),
+      userId,
+      userName: context?.userName || userName
+    };
+
+    const existingMemory: AssistantUserMemory = dbData.assistantMemories[userId] || {
+      userId,
+      userName: runtimeContext.userName || userName,
+      userRole: String(runtimeContext.userRole || "ceo"),
+      notes: [],
+      messages: [],
+      updatedAt: Date.now()
+    };
+
+    // Update profile metadata in memory
+    existingMemory.userName = runtimeContext.userName || existingMemory.userName;
+    existingMemory.userRole = String(runtimeContext.userRole || existingMemory.userRole || "ceo");
+
+    const userTurn: AssistantChatMessage = {
+      id: `msg-u-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      role: "user",
+      content: String(message).trim(),
+      timestamp: new Date().toISOString()
+    };
+
+    const result = processMitiorAssistantQuery(String(message), runtimeContext, existingMemory);
+
+    if (result.clearedNotes) {
+      existingMemory.notes = [];
+    } else if (result.addedNote && !existingMemory.notes.includes(result.addedNote)) {
+      existingMemory.notes.push(result.addedNote);
+    }
+
+    const assistantTurn: AssistantChatMessage = {
+      id: `msg-a-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      role: "assistant",
+      content: result.reply,
+      timestamp: new Date().toISOString(),
+      executedAction: result.executedAction,
+      suggestedActions: result.suggestedActions
+    };
+
+    existingMemory.messages = [...existingMemory.messages, userTurn, assistantTurn].slice(-100);
+    existingMemory.updatedAt = Date.now();
+
+    dbData.assistantMemories[userId] = existingMemory;
+    writeDB(dbData);
+
+    return res.json({
+      success: true,
+      isGrounded: result.isGrounded,
+      reply: result.reply,
+      executedAction: result.executedAction || null,
+      suggestedActions: result.suggestedActions,
+      memory: existingMemory
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Assistant processing exception: " + errStr(err) });
+  }
+});
+
+app.delete("/api/assistant/memory", (req, res) => {
+  try {
+    const { userId, userName } = resolveAssistantMemoryKey(req);
+    const dbData = readDB();
+    dbData.assistantMemories = dbData.assistantMemories || {};
+
+    dbData.assistantMemories[userId] = {
+      userId,
+      userName,
+      userRole: "ceo",
+      notes: [],
+      messages: [],
+      updatedAt: Date.now()
+    };
+    writeDB(dbData);
+
+    return res.json({
+      success: true,
+      message: "Helper Bot conversation history and memory cleared for user.",
+      memory: dbData.assistantMemories[userId]
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to clear assistant memory: " + errStr(err) });
+  }
+});
+
+// K. ADMIN PORTAL SYSTEM OVERVIEW ENDPOINT
+app.get("/api/admin/overview", requireLoggedInUser, (req, res) => {
+  try {
+    const dbData = readDB();
+    return res.json({
+      success: true,
+      stats: {
+        registeredUsers: (dbData.users || []).length,
+        totalBackups: (dbData.backups || []).length,
+        activeSyncCodes: (dbData.syncCodes || []).length,
+        configuredPins: (dbData.pins || []).length,
+        paymentTransactions: (dbData.payments || []).length,
+        activeAssistantMemories: Object.keys(dbData.assistantMemories || {}).length
+      },
+      users: (dbData.users || []).map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        paidTicket: u.paidTicket || "free"
+      }))
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to load admin overview: " + errStr(err) });
+  }
+});
+
 // Setup Vite and Express asset pipeline integration
-async function startServer() {
+export async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     console.log("[MitiorOS] Launching DEV node (Express + Vite Proxy)...");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          ignored: [
+            "**/server_db.json",
+            "**/mitior_db.json",
+            "**/test_server_db.json",
+            "**/*.db.json",
+            "**/*.log"
+          ]
+        }
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -1148,9 +1448,16 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  return app.listen(PORT, "0.0.0.0", () => {
     console.log(`[MitiorOS] Core node running at http://localhost:${PORT}`);
   });
 }
 
-startServer();
+const isTestEnv =
+  process.env.MITIOR_TEST_MODE === "true" ||
+  process.env.NODE_TEST_CONTEXT !== undefined ||
+  process.argv.some(arg => arg.includes("--test") || arg.includes(".test."));
+
+if (!isTestEnv) {
+  startServer();
+}

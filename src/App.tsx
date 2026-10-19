@@ -19,7 +19,11 @@ import {
   Unlock,
   ChevronDown,
   Sparkles,
-  Download
+  Download,
+  BookOpen,
+  ArrowUp,
+  LayoutGrid,
+  Bot
 } from 'lucide-react';
 
 import { 
@@ -30,6 +34,7 @@ import {
   SprintPlan, 
   ClarityCompass,
   RecentActivity,
+  UserRole,
   INITIAL_COMPASS,
   INITIAL_TEAM_MEMBERS,
   INITIAL_PLAYBOOKS,
@@ -48,18 +53,23 @@ import SprintCanvasView from './components/SprintCanvasView';
 import ClarityCompassView from './components/ClarityCompassView';
 import SettingsView from './components/SettingsView';
 import EnquiriesView, { Enquiry } from './components/EnquiriesView';
+import SrsDocumentView from './components/SrsDocumentView';
 import LoginAuthView from './components/LoginAuthView';
 import OnboardingPreloadView from './components/OnboardingPreloadView';
 import LandingPageView from './components/LandingPageView';
 import WorkspaceSelectorView from './components/WorkspaceSelectorView';
 import DesktopInstallerModal from './components/DesktopInstallerModal';
 import CheckoutPortal from './components/CheckoutPortal';
+import MitiorHelperBot from './components/MitiorHelperBot';
+import { AssistantAction } from './assistantEngine';
 
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [dockMenuOpen, setDockMenuOpen] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [helperBotOpen, setHelperBotOpen] = useState<boolean>(false);
   
   // Real-time local license states managed via local caching
   const [licenseTier, setLicenseTier] = useState<'free' | 'starter' | 'professional' | 'enterprise'>(() => {
@@ -111,8 +121,9 @@ export default function App() {
     }
   });
   const [initialSignUpMode, setInitialSignUpMode] = useState<boolean>(false);
-  const [userRole, setUserRole] = useState<'ceo' | 'employee'>(() => {
-    return (localStorage.getItem('sOS_user_role') as 'ceo' | 'employee') || 'ceo';
+  const [initialAdminMode, setInitialAdminMode] = useState<boolean>(false);
+  const [userRole, setUserRole] = useState<UserRole>(() => {
+    return (localStorage.getItem('sOS_user_role') as UserRole) || 'ceo';
   });
   const [showWorkspaceSetup, setShowWorkspaceSetup] = useState<boolean>(() => {
     return !localStorage.getItem('sOS_workspace_setup_done');
@@ -889,24 +900,201 @@ export default function App() {
     }
   };
 
-  const handleLoginSuccess = (account: { id: string; name: string; email: string; paidTicket?: "starter" | "enterprise" | "free" | null }, isNew?: boolean) => {
+  const handleLoginSuccess = (
+    account: { id: string; name: string; email: string; paidTicket?: "starter" | "enterprise" | "free" | null },
+    isNew?: boolean,
+    isAdminLogin?: boolean
+  ) => {
     localStorage.setItem('sOS_current_account', JSON.stringify({ id: account.id, name: account.name, email: account.email }));
-    const serverTier = account.paidTicket || 'free';
+    const serverTier = account.paidTicket || (isAdminLogin ? 'enterprise' : 'free');
     localStorage.setItem('sOS_license_tier', serverTier);
     setLicenseTier(serverTier as any);
     
     setCurrentUser({ id: account.id, name: account.name, email: account.email });
     setUserName(account.name);
-    setShowWelcome(isNew);
-    setShowWorkspaceSetup(!localStorage.getItem('sOS_workspace_setup_done'));
-    setShowLanding(false);
+
+    if (isAdminLogin) {
+      const adminRole: UserRole = account.email.toLowerCase() === 'zejithefundi@gmail.com' ? 'fundi' : 'ceo';
+      setUserRole(adminRole);
+      localStorage.setItem('sOS_user_role', adminRole);
+      localStorage.setItem('sOS_workspace_setup_done', 'true');
+      setShowWelcome(false);
+      setShowWorkspaceSetup(false);
+      setShowLanding(false);
+    } else {
+      setShowWelcome(!!isNew);
+      setShowWorkspaceSetup(!localStorage.getItem('sOS_workspace_setup_done'));
+      setShowLanding(false);
+    }
+  };
+
+  const handleUpdateUserRole = (newRole: UserRole) => {
+    setUserRole(newRole);
+    localStorage.setItem('sOS_user_role', newRole);
+  };
+
+  const handleExecuteAssistantAction = async (action: AssistantAction) => {
+    const p = action.payload || {};
+
+    switch (action.type) {
+      case 'navigate': {
+        if (p.tab) {
+          setActiveTab(String(p.tab));
+        }
+        break;
+      }
+      case 'create_playbook': {
+        if (pinLockActive || userRole === 'auditor') break;
+        const pbTitle = String(p.title || 'New Standard Operating Procedure').trim();
+        const newPbId = `pb-bot-${Date.now()}`;
+        const newPb: Playbook = {
+          id: newPbId,
+          title: pbTitle,
+          powerStageId: nodes[0]?.id || 've-1',
+          powerStageLabel: nodes[0]?.label || 'Core Stage',
+          ownerId: teamMembers[0]?.id || 'tm-owner',
+          instructions: `### Executive Overview\nStandard Operating Procedure for **${pbTitle}** generated via Mitior OS Helper Bot.\n\n### Verification Protocol\n- Review stage inputs and quality gates\n- Confirm sign-off with responsible operator`,
+          steps: [
+            { id: `step-${Date.now()}-1`, text: `Initialize ${pbTitle} checklist`, done: false },
+            { id: `step-${Date.now()}-2`, text: `Verify quality benchmark and log completion`, done: false }
+          ],
+          lastUpdated: new Date().toISOString().slice(0, 10)
+        };
+        handleUpdatePlaybooksWithHistory([newPb, ...playbooks]);
+        setSelectedPlaybookId(newPbId);
+        setActiveTab('playbooks');
+        break;
+      }
+      case 'add_team_member': {
+        if (pinLockActive || userRole === 'auditor') break;
+        const newMember: TeamMember = {
+          id: `tm-bot-${Date.now()}`,
+          name: String(p.name || 'New Operator').trim(),
+          jobTitle: String(p.jobTitle || 'Operations Specialist').trim(),
+          manager: userName || 'Founder & CEO',
+          accountabilities: ['SOP Execution', 'Weekly KPI Reporting'],
+          isFounder: false
+        };
+        setTeamMembers(prev => [...prev, newMember]);
+        setActiveTab('team');
+        break;
+      }
+      case 'add_kpi': {
+        if (pinLockActive || userRole === 'auditor') break;
+        const kpiName = String(p.name || 'Weekly Qualified Leads').trim();
+        const kpiGoal = String(p.goal || '50').trim();
+        const newMetric: ScorecardMetric = {
+          id: `sc-bot-${Date.now()}`,
+          name: kpiName,
+          category: 'evergreen',
+          ownerId: teamMembers[0]?.id || 'tm-owner',
+          target: kpiGoal,
+          status: 'GREEN',
+          metricSource: 'Helper Bot',
+          unit: '#',
+          notes: 'Created via mOS Helper Bot',
+          weeklyActuals: { 'Week 1': '0', 'Week 2': '0', 'Week 3': '0', 'Week 4': '0' }
+        };
+        setScorecard(prev => [...prev, newMetric]);
+        setActiveTab('scorecard');
+        break;
+      }
+      case 'add_sprint_initiative': {
+        if (pinLockActive || userRole === 'auditor') break;
+        const initTitle = String(p.title || 'New Quarterly Initiative').trim();
+        setSprintPlan(prev => ({
+          ...prev,
+          initiatives: [
+            ...(prev.initiatives || []),
+            {
+              id: `init-bot-${Date.now()}`,
+              name: initTitle,
+              dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+              ownerId: teamMembers[0]?.id || 'tm-owner',
+              status: 'On-Track',
+              stakeholders: userName || 'Operations Team',
+              team: 'Operations',
+              pillar: prev.strategicPillars?.[0]?.title || 'Operational Excellence'
+            }
+          ]
+        }));
+        setActiveTab('sprint');
+        break;
+      }
+      case 'create_project': {
+        if (pinLockActive || userRole === 'auditor') break;
+        const wsName = String(p.name || 'New Workspace').trim();
+        const wsDesc = String(p.description || 'Created via mOS Helper Bot').trim();
+        handleCreateProject(wsName, wsDesc);
+        break;
+      }
+      case 'switch_role': {
+        if (p.role) {
+          handleUpdateUserRole(p.role as UserRole);
+        }
+        break;
+      }
+      case 'toggle_theme': {
+        const nextTheme = p.theme === 'dark' || p.theme === 'light'
+          ? p.theme
+          : (theme === 'light' ? 'dark' : 'light');
+        setTheme(nextTheme);
+        break;
+      }
+      case 'trigger_backup': {
+        if (!currentUser) break;
+        try {
+          const activeProjObj = projects.find(proj => proj.id === activeProjectId);
+          await fetch('/api/db/backup', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              userId: currentUser.id,
+              projectId: activeProjectId,
+              projectName: activeProjObj?.name || 'My Workspace',
+              description: 'Helper Bot automated snapshot',
+              data: { nodes, playbooks, teamMembers, scorecard, sprintPlan, compass }
+            })
+          });
+        } catch {}
+        break;
+      }
+      case 'open_installer': {
+        setShowInstallerPopout(true);
+        break;
+      }
+      case 'download_srs': {
+        setActiveTab('srs');
+        try {
+          const res = await fetch('/api/srs');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.markdown) {
+              const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'SRS.md';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }
+          }
+        } catch {}
+        break;
+      }
+      default:
+        break;
+    }
   };
 
   const handleWorkspaceSelectorComplete = (setup: {
-    role: 'ceo' | 'employee';
+    role: UserRole;
     workspaceName: string;
     workspaceDesc: string;
     shouldPreloadData: boolean;
+    syncedWorkspaceData?: any;
   }) => {
     if (!currentUser) return;
     
@@ -930,9 +1118,29 @@ export default function App() {
     const sprK = `sOS_sprint_${accId}_${projId}`;
     const cmpK = `sOS_compass_${accId}_${projId}`;
     const enqK = `sOS_enquiries_${accId}_${projId}`;
+
+    const defaultNodes = [
+      ...INITIAL_GROWTH_NODES.map(g => {
+        const pbMatch = INITIAL_PLAYBOOKS.find(pb => pb.powerStageId === g.id);
+        return { ...g, playbookId: pbMatch ? pbMatch.id : '' };
+      }),
+      ...INITIAL_FULFILLMENT_NODES.map(f => {
+        const pbMatch = INITIAL_PLAYBOOKS.find(pb => pb.powerStageId === f.id);
+        return { ...f, playbookId: pbMatch ? pbMatch.id : '' };
+      })
+    ];
     
-    if (setup.shouldPreloadData) {
-      localStorage.setItem(nodK, JSON.stringify([]));
+    if (setup.syncedWorkspaceData) {
+      const sw = setup.syncedWorkspaceData;
+      localStorage.setItem(nodK, JSON.stringify(sw.nodes || defaultNodes));
+      localStorage.setItem(plbK, JSON.stringify(sw.playbooks || INITIAL_PLAYBOOKS));
+      localStorage.setItem(teamK, JSON.stringify(sw.teamMembers || INITIAL_TEAM_MEMBERS));
+      localStorage.setItem(scK, JSON.stringify(sw.scorecard || INITIAL_SCORECARD));
+      localStorage.setItem(sprK, JSON.stringify(sw.sprintPlan || INITIAL_SPRINT_PLAN));
+      localStorage.setItem(cmpK, JSON.stringify(sw.compass || INITIAL_COMPASS));
+      localStorage.setItem(enqK, JSON.stringify([]));
+    } else if (setup.shouldPreloadData) {
+      localStorage.setItem(nodK, JSON.stringify(defaultNodes));
       localStorage.setItem(plbK, JSON.stringify(INITIAL_PLAYBOOKS));
       localStorage.setItem(teamK, JSON.stringify(INITIAL_TEAM_MEMBERS));
       localStorage.setItem(scK, JSON.stringify(INITIAL_SCORECARD));
@@ -965,7 +1173,7 @@ export default function App() {
     }, 100);
   };
 
-  // Nav Items with dynamic Inbox and Config links integrated
+  // Nav Items with dynamic Inbox, Config, and 10. SRS Specs links integrated
   const navItems = [
     { id: 'overview', label: 'Home Node', icon: Home },
     { id: 'engines', label: '1. Value Engines', icon: Layers },
@@ -976,6 +1184,7 @@ export default function App() {
     { id: 'compass', label: '6. Clarity Compass', icon: Compass },
     { id: 'enquiries', label: '8. Enquiries', icon: Inbox },
     { id: 'settings', label: '7. Settings', icon: Settings },
+    { id: 'srs', label: '10. SRS Specs', icon: BookOpen },
   ];
 
   // Intercept authentication flow with Landing page first
@@ -985,14 +1194,22 @@ export default function App() {
         currentUser={currentUser}
         onGetStarted={() => {
           setInitialSignUpMode(true);
+          setInitialAdminMode(false);
           setShowLanding(false);
         }} 
         onLoginClick={() => {
           setInitialSignUpMode(false);
+          setInitialAdminMode(false);
           setShowLanding(false);
         }} 
+        onAdminLoginClick={() => {
+          setInitialSignUpMode(false);
+          setInitialAdminMode(true);
+          setShowLanding(false);
+        }}
         onSignUpClick={() => {
           setInitialSignUpMode(true);
+          setInitialAdminMode(false);
           setShowLanding(false);
         }}
         licenseTier={licenseTier}
@@ -1006,6 +1223,7 @@ export default function App() {
         onLoginSuccess={handleLoginSuccess}
         onBackToLanding={() => setShowLanding(true)} 
         initialSignUp={initialSignUpMode}
+        initialAdminMode={initialAdminMode}
       />
     );
   }
@@ -1077,9 +1295,10 @@ export default function App() {
       case 'team': return { title: 'Team Canvas Organogram', subtitle: 'Assign structural accountabilities and view active team operators.' };
       case 'scorecard': return { title: 'Vitals Scorecard', subtitle: 'Track metrics, KPIs, and operational goals with historical review.' };
       case 'sprint': return { title: 'Sprints & Rhythms', subtitle: 'Quarterly rock plan, 13-week sprints, and standard meeting schedules.' };
-      case 'compass': return { title: 'Clarity Compass', subtitle: 'Formulate your mission, strategic vision, purpose, and values.' };
+      case 'compass': return { title: 'Clarity Compass', subtitle: 'Formulate your mission, strategic vision, purpose, values, and 4C decisions.' };
       case 'enquiries': return { title: 'Workspace Enquiries', subtitle: 'Incoming messages, feedback loops, and customer service channels.' };
       case 'settings': return { title: 'System Settings', subtitle: 'Manage workspaces, local imports/exports, security credentials, and offline installer options.' };
+      case 'srs': return { title: '10. SRS Specification (IEEE 830)', subtitle: 'Interactive Software Requirements Specification, traceability matrix, and data schemas.' };
       default: return { title: 'Mitior OS Workspace', subtitle: 'Modern offline-first business template orchestrator.' };
     }
   };
@@ -1090,12 +1309,12 @@ export default function App() {
     <div id="sos-root-layout" className="min-h-screen bg-[#f5f5f7] dark:bg-[#161617] flex flex-col lg:flex-row text-[#1d1d1f] dark:text-[#f5f5f7] transition-colors duration-200">
       
       {/* 1. PERSISTENT NAVIGATION SIDEBAR - Desktop Only */}
-      <aside className={`hidden lg:flex flex-col bg-white dark:bg-[#1d1d1f] border-r border-[#e8e8ed] dark:border-[#2d2d2f] sticky top-0 h-screen overflow-y-auto select-none shrink-0 z-30 transition-all duration-300 ${sidebarCollapsed ? 'w-[72px]' : 'w-64'}`}>
+      <aside className={`hidden lg:flex flex-col bg-white dark:bg-[#1d1d1f] border-r border-[#e8e8ed] dark:border-[#2d2d2f] sticky top-0 h-screen overflow-y-auto no-scrollbar select-none shrink-0 z-30 transition-all duration-300 ${sidebarCollapsed ? 'w-[72px]' : 'w-60'}`}>
         
         {/* Brand Header */}
         <div 
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`p-5 border-b border-[#e8e8ed] dark:border-[#2d2d2f] flex items-center transition cursor-pointer hover:bg-[#f5f5f7] dark:hover:bg-[#252526]/50 ${sidebarCollapsed ? 'justify-center p-4' : 'gap-3'}`}
+          className={`p-4 border-b border-[#e8e8ed] dark:border-[#2d2d2f] flex items-center transition cursor-pointer hover:bg-[#f5f5f7] dark:hover:bg-[#252526]/50 ${sidebarCollapsed ? 'justify-center p-3.5' : 'gap-3'}`}
           title={sidebarCollapsed ? "Expand Sidebar Layout" : "Collapse Sidebar Layout"}
         >
           <div className="bg-[#1d1d1f] dark:bg-white p-2 rounded-xl text-white dark:text-[#1d1d1f] shrink-0 flex items-center justify-center shadow-xs">
@@ -1103,7 +1322,7 @@ export default function App() {
           </div>
           {!sidebarCollapsed && (
             <div className="space-y-0.5 text-left animate-duration-150">
-              <h1 className="font-sans font-extrabold text-sm tracking-tight text-[#1d1d1f] dark:text-white leading-none">Mitior OS</h1>
+              <h1 className="font-display font-extrabold text-sm tracking-tight text-[#1d1d1f] dark:text-white leading-none">Mitior OS</h1>
               <p className="text-[10px] text-[#004b49] dark:text-[#95d1ce] font-bold tracking-widest uppercase mb-0">
                 {licenseTier === 'enterprise' ? 'Local Engine' : 'Cloud Sandbox'}
               </p>
@@ -1113,13 +1332,13 @@ export default function App() {
 
         {/* Dynamic Workspace Picker inside Sidebar */}
         {!sidebarCollapsed && (
-          <div className="p-4 border-b border-[#e8e8ed] dark:border-[#2d2d2f] bg-[#fbfbfd] dark:bg-[#252526]/30 text-left animate-duration-150">
+          <div className="px-3.5 py-3 border-b border-[#e8e8ed] dark:border-[#2d2d2f] bg-[#fbfbfd] dark:bg-[#252526]/30 text-left animate-duration-150">
             <label className="text-[9.5px] font-bold text-[#86868b] dark:text-[#8e8e93] uppercase tracking-wider block mb-1">Active Office Workspace</label>
             <div className="relative">
               <select
                 value={activeProjectId}
                 onChange={(e) => handleSwitchProject(e.target.value)}
-                className="w-full bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl py-2 pl-3 pr-8 outline-none appearance-none cursor-pointer focus:border-indigo-500 transition shadow-2xs"
+                className="w-full bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl py-1.5 pl-3 pr-8 outline-none appearance-none cursor-pointer focus:border-indigo-500 transition shadow-2xs"
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -1131,7 +1350,7 @@ export default function App() {
         )}
 
         {/* Vertical Navigation Links */}
-        <nav className="flex-1 px-3 py-4 space-y-1 text-left">
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5 text-left overflow-y-auto no-scrollbar">
           {navItems.map(item => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -1140,7 +1359,7 @@ export default function App() {
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
                 className={`w-full flex items-center rounded-xl font-sans text-xs font-semibold transition-all duration-100 cursor-pointer ${
-                  sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
+                  sidebarCollapsed ? 'justify-center p-2.5' : 'gap-2.5 px-3 py-2'
                 } ${
                   isActive 
                     ? 'bg-[#1d1d1f] dark:bg-[#f5f5f7] text-white dark:text-[#1d1d1f] shadow-xs' 
@@ -1149,14 +1368,14 @@ export default function App() {
                 title={sidebarCollapsed ? item.label : undefined}
               >
                 <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#e6b349] dark:text-[#2d4df5] scale-105' : 'text-[#86868b]'}`} />
-                {!sidebarCollapsed && <span className="animate-duration-150">{item.label}</span>}
+                {!sidebarCollapsed && <span className="animate-duration-150 truncate">{item.label}</span>}
               </button>
             );
           })}
         </nav>
 
         {/* Bottom Utility Panel */}
-        <div className={`border-t border-[#e8e8ed] dark:border-[#2d2d2f] bg-[#fbfbfd] dark:bg-[#252526]/20 transition-all ${sidebarCollapsed ? 'p-2.5 space-y-2' : 'p-4 space-y-3'}`}>
+        <div className={`border-t border-[#e8e8ed] dark:border-[#2d2d2f] bg-[#fbfbfd] dark:bg-[#252526]/20 transition-all ${sidebarCollapsed ? 'p-2.5 space-y-2' : 'p-3.5 space-y-2.5'}`}>
           
           {/* Security Shield Lock Trigger */}
           {isPinConfiguredOnServer && (
@@ -1169,7 +1388,7 @@ export default function App() {
                 }
               }}
               className={`w-full flex items-center justify-between font-bold border transition duration-150 cursor-pointer ${
-                sidebarCollapsed ? 'p-2 justify-center rounded-lg' : 'px-3 py-2 rounded-xl text-[11px]'
+                sidebarCollapsed ? 'p-2 justify-center rounded-lg' : 'px-3 py-1.5 rounded-xl text-[11px]'
               } ${
                 pinLockActive 
                   ? 'bg-amber-50/50 dark:bg-amber-950/10 border-amber-200/60 text-amber-700 dark:text-amber-400' 
@@ -1190,7 +1409,7 @@ export default function App() {
           )}
 
           {/* Theme Switch & User Status Row */}
-          <div className={`flex items-center justify-between ${sidebarCollapsed ? 'flex-col gap-2' : 'gap-2.5'}`}>
+          <div className={`flex items-center justify-between ${sidebarCollapsed ? 'flex-col gap-2' : 'gap-2'}`}>
             <div className="flex items-center gap-2 text-left min-w-0">
               <div 
                 className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-black text-xs flex items-center justify-center shrink-0 cursor-pointer"
@@ -1202,7 +1421,9 @@ export default function App() {
               {!sidebarCollapsed && (
                 <div className="min-w-0 leading-tight animate-duration-150">
                   <p className="text-[10.5px] font-bold text-[#1d1d1f] dark:text-white truncate mb-0">{currentUser?.name || 'Ryan Deiss'}</p>
-                  <p className="text-[9.5px] text-[#86868b] dark:text-[#8e8e93] capitalize truncate mb-0">{userRole === 'ceo' ? 'Founder & CEO' : 'Staff operator'}</p>
+                  <p className="text-[9.5px] text-[#86868b] dark:text-[#8e8e93] uppercase font-semibold truncate mb-0">
+                    {userRole === 'ceo' ? 'CEO' : userRole === 'fundi' ? 'Fundi' : userRole === 'auditor' ? 'Auditor' : 'Operator'}
+                  </p>
                 </div>
               )}
             </div>
@@ -1222,12 +1443,12 @@ export default function App() {
           </div>
 
           {/* License Badge */}
-          <div className="pt-1.5">
+          <div className="pt-1">
             {licenseTier === 'enterprise' ? (
               sidebarCollapsed ? (
                 <div className="text-center text-[10px]" title="Enterprise Local App">🌟</div>
               ) : (
-                <div className="bg-gradient-to-r from-amber-500 to-yellow-500 text-white text-[9px] font-black uppercase tracking-wider py-1.5 px-2 rounded-xl shadow-xs text-center">
+                <div className="bg-gradient-to-r from-amber-500 to-yellow-500 text-white text-[9px] font-black uppercase tracking-wider py-1 px-2 rounded-xl shadow-xs text-center">
                   🌟 Enterprise Local App
                 </div>
               )
@@ -1255,8 +1476,8 @@ export default function App() {
       {/* 2. MAIN WORKING ENGINE SPACE */}
       <div className="flex-1 flex flex-col min-h-screen min-w-0 bg-[#f5f5f7] dark:bg-[#161617]">
         
-        {/* Elegant Context-First Header Bar */}
-        <header className="bg-white/80 dark:bg-[#1d1d1f]/80 backdrop-blur-md border-b border-[#e8e8ed] dark:border-[#2d2d2f] sticky top-0 z-45 select-none px-6 py-3.5">
+        {/* Elegant Context-First Header Bar (Compacted for Zero-Scrollbar Ergonomics) */}
+        <header className="bg-white/80 dark:bg-[#1d1d1f]/80 backdrop-blur-md border-b border-[#e8e8ed] dark:border-[#2d2d2f] sticky top-0 z-45 select-none px-4 sm:px-6 py-2.5">
           <div className="flex items-center justify-between gap-4">
             
             {/* Left Portion: Context Title or Mobile Trigger */}
@@ -1273,14 +1494,14 @@ export default function App() {
 
               {/* Title & subtitle */}
               <div className="min-w-0">
-                <h2 className="font-sans font-bold text-sm md:text-base text-[#1d1d1f] dark:text-white tracking-tight flex items-center gap-2 truncate mb-0">
+                <h2 className="font-display font-bold text-sm md:text-base text-[#1d1d1f] dark:text-white tracking-tight flex items-center gap-2 truncate mb-0">
                   <button
                     onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                     className="hidden md:flex items-center gap-1.5 text-xs text-[#86868b] dark:text-[#8e8e93] font-semibold hover:text-[#1d1d1f] dark:hover:text-white transition duration-150 select-none cursor-pointer bg-transparent border-0 p-0 mr-1.5 focus:outline-none"
                     title={sidebarCollapsed ? "Expand Sidebar Layout" : "Collapse Sidebar Layout"}
                   >
                     <Compass className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>Users Workspace</span>
+                    <span>{activeProjName}</span>
                     <span>//</span>
                   </button>
                   <span>{headerInfo.title}</span>
@@ -1291,8 +1512,33 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Portion: Quick Project Dropdown selector & license info */}
-            <div className="flex items-center gap-3 shrink-0">
+            {/* Right Portion: Quick SRS pill, Helper Bot pill, Project Dropdown selector & license info */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                onClick={() => setHelperBotOpen(!helperBotOpen)}
+                className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-xl border transition cursor-pointer ${
+                  helperBotOpen
+                    ? 'bg-[#004b49] text-white border-[#004b49]'
+                    : 'bg-[#004b49]/10 dark:bg-[#76b0b1]/15 text-[#004b49] dark:text-[#95d1ce] border-[#004b49]/25 dark:border-[#76b0b1]/30 hover:bg-[#004b49] hover:text-white'
+                }`}
+                title="Open Grounded Mitior OS Helper Bot (Memory Active)"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span className="hidden xs:inline">Helper Bot</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('srs')}
+                className={`hidden sm:inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-xl border transition cursor-pointer ${
+                  activeTab === 'srs'
+                    ? 'bg-[#004b49] text-white border-[#004b49]'
+                    : 'bg-[#f5f5f7] dark:bg-[#252526] text-[#1d1d1f] dark:text-white border-[#e8e8ed] dark:border-[#2d2d2f] hover:border-[#004b49]'
+                }`}
+                title="View IEEE 830 Software Requirements Specification"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>10. SRS Specs</span>
+              </button>
               
               {/* Quick Select workspace for tablet/mobile where sidebar is hidden */}
               <div className="lg:hidden relative">
@@ -1369,7 +1615,7 @@ export default function App() {
                     setActiveTab(item.id);
                     setMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition duration-100 cursor-pointer ${
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition duration-100 cursor-pointer ${
                     isActive 
                       ? 'bg-[#1d1d1f] dark:bg-[#f5f5f7] text-white dark:text-[#1d1d1f] font-medium' 
                       : 'hover:bg-[#f5f5f7] dark:hover:bg-[#252526] text-[#86868b] dark:text-[#8e8e93]'
@@ -1382,7 +1628,7 @@ export default function App() {
             })}
 
             <div className="pt-3 border-t border-[#e8e8ed] dark:border-[#2e2e30] flex items-center justify-between">
-              <span className="text-[10px] text-[#86868b] font-medium capitalize">Role: {userRole === 'ceo' ? 'Founder (CEO)' : 'Operator'}</span>
+              <span className="text-[10px] text-[#86868b] font-medium uppercase">Role: {userRole}</span>
               <button
                 onClick={() => {
                   setTheme(theme === 'light' ? 'dark' : 'light');
@@ -1396,12 +1642,12 @@ export default function App() {
           </div>
         )}
 
-        {/* Primary container viewport */}
-        <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-8">
+        {/* Primary container viewport (Compacted vertical padding for Zero-Scrollbar Ergonomics) */}
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-6 py-5 pb-24">
           
           {/* Security Shield Lock active notification banner */}
           {pinLockActive && (
-            <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-2xl flex items-center gap-3 text-amber-800 dark:text-amber-400 text-xs shadow-sm animate-fade-in text-left">
+            <div className="mb-4 p-3.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-2xl flex items-center gap-3 text-amber-800 dark:text-amber-400 text-xs shadow-sm animate-fade-in text-left">
               <Lock className="w-5 h-5 text-amber-500 shrink-0" />
               <div className="flex-1">
                 <span className="font-bold block">Security Shield Lock Active ({currentUser?.name || "Corporate Admin"})</span>
@@ -1436,7 +1682,7 @@ export default function App() {
                 localStorage.setItem('sOS_current_account', JSON.stringify(updatedUser));
               }
             }}
-            userRole={pinLockActive ? 'employee' : userRole}
+            userRole={pinLockActive ? 'auditor' : userRole}
             activities={activities}
             onClearActivities={() => setActivities([])}
             onUpdateTeam={setTeamMembers}
@@ -1450,7 +1696,7 @@ export default function App() {
             playbooks={playbooks}
             onUpdateNodes={handleUpdateNodesWithHistory}
             onNavigateToPlaybook={navigateToPlaybook}
-            userRole={pinLockActive ? 'employee' : userRole}
+            userRole={pinLockActive ? 'auditor' : userRole}
             onUndo={handleUndoNodes}
             onRedo={handleRedoNodes}
             canUndo={nodesHistoryIndex > 0}
@@ -1466,7 +1712,7 @@ export default function App() {
             onUpdatePlaybooks={handleUpdatePlaybooksWithHistory}
             selectedPlaybookId={selectedPlaybookId}
             setSelectedPlaybookId={setSelectedPlaybookId}
-            userRole={pinLockActive ? 'employee' : userRole}
+            userRole={pinLockActive ? 'auditor' : userRole}
             onUndo={handleUndoPlaybooks}
             onRedo={handleRedoPlaybooks}
             canUndo={playbooksHistoryIndex > 0}
@@ -1504,7 +1750,7 @@ export default function App() {
           <ClarityCompassView 
             compass={compass}
             onUpdateCompass={setCompass}
-            userRole={pinLockActive ? 'employee' : userRole}
+            userRole={pinLockActive ? 'auditor' : userRole}
           />
         )}
 
@@ -1513,6 +1759,10 @@ export default function App() {
             enquiries={enquiries}
             onUpdateEnquiries={setEnquiries}
           />
+        )}
+
+        {activeTab === 'srs' && (
+          <SrsDocumentView />
         )}
 
         {activeTab === 'settings' && (
@@ -1533,6 +1783,7 @@ export default function App() {
             currentUser={currentUser}
             onLogout={handleLogout}
             userRole={userRole}
+            onUpdateUserRole={handleUpdateUserRole}
             onOpenLauncherGuide={() => setShowInstallerPopout(true)}
             licenseTier={licenseTier}
             onOpenCheckout={() => setShowPaymentPortal(true)}
@@ -1542,6 +1793,207 @@ export default function App() {
         )}
 
       </main>
+
+      {/* PERSISTENT FLOATING BOTTOM DOCK (FR-NAV-02) */}
+      <div
+        id="persistent-bottom-dock"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white/90 dark:bg-[#1d1d1f]/95 backdrop-blur-xl border border-[#e8e8ed] dark:border-[#2d2d2f] shadow-xl select-none"
+      >
+        <button
+          onClick={() => setDockMenuOpen(!dockMenuOpen)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+            dockMenuOpen
+              ? 'bg-[#004b49] text-white'
+              : 'bg-[#1d1d1f] dark:bg-white text-white dark:text-[#1d1d1f] hover:opacity-90'
+          }`}
+          title="Open Workspace Navigation Sheet Modal"
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          <span>Menu</span>
+        </button>
+
+        <div className="h-4 w-px bg-[#e8e8ed] dark:bg-[#2d2d2f] mx-0.5" />
+
+        {[
+          { id: 'overview', label: 'Home', icon: Home },
+          { id: 'engines', label: 'Engines', icon: Layers },
+          { id: 'playbooks', label: 'SOPs', icon: FileText },
+          { id: 'scorecard', label: 'Scorecard', icon: TrendingUp },
+          { id: 'srs', label: '10. SRS Specs', icon: BookOpen },
+          { id: 'settings', label: 'Settings', icon: Settings },
+        ].map(dockItem => {
+          const Icon = dockItem.icon;
+          const isActive = activeTab === dockItem.id;
+          return (
+            <button
+              key={dockItem.id}
+              onClick={() => {
+                setActiveTab(dockItem.id);
+                setDockMenuOpen(false);
+              }}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
+                isActive
+                  ? 'bg-[#004b49]/10 dark:bg-[#76b0b1]/20 text-[#004b49] dark:text-[#76b0b1] font-bold'
+                  : 'text-[#86868b] dark:text-[#8e8e93] hover:text-[#1d1d1f] dark:hover:text-white hover:bg-[#f5f5f7] dark:hover:bg-[#252526]'
+              }`}
+              title={dockItem.label}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden md:inline">{dockItem.label}</span>
+            </button>
+          );
+        })}
+
+        <div className="h-4 w-px bg-[#e8e8ed] dark:bg-[#2d2d2f] mx-0.5" />
+
+        <button
+          onClick={() => setHelperBotOpen(!helperBotOpen)}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+            helperBotOpen
+              ? 'bg-[#004b49] text-white'
+              : 'text-[#004b49] dark:text-[#95d1ce] hover:bg-[#004b49]/10 dark:hover:bg-[#76b0b1]/20'
+          }`}
+          title="Open Grounded mOS Helper Bot"
+        >
+          <Bot className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden md:inline">Bot</span>
+        </button>
+
+        <button
+          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          className="p-1.5 rounded-xl text-[#86868b] hover:text-[#1d1d1f] dark:hover:text-white hover:bg-[#f5f5f7] dark:hover:bg-[#252526] transition cursor-pointer"
+          title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+        >
+          {theme === 'light' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+        </button>
+
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold text-[#86868b] hover:text-[#1d1d1f] dark:hover:text-white hover:bg-[#f5f5f7] dark:hover:bg-[#252526] transition cursor-pointer"
+          title="Return to Top"
+        >
+          <ArrowUp className="w-3.5 h-3.5" />
+          <span className="hidden lg:inline">Top</span>
+        </button>
+      </div>
+
+      {/* WORKSPACE NAVIGATION SHEET MODAL (Pop-Up Menu from Floating Dock) */}
+      {dockMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4 animate-fade-in"
+          onClick={() => setDockMenuOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] rounded-3xl p-6 w-full max-w-2xl shadow-2xl space-y-5 text-left"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#e8e8ed] dark:border-[#2d2d2f] pb-3.5">
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-[#004b49] dark:text-[#76b0b1] font-bold block">
+                  MITIOR OS QUICK SWITCHER
+                </span>
+                <h3 className="text-lg font-display font-bold text-[#1d1d1f] dark:text-white">
+                  Workspace Navigation Sheet
+                </h3>
+              </div>
+              <button
+                onClick={() => setDockMenuOpen(false)}
+                className="p-2 rounded-xl bg-[#f5f5f7] dark:bg-[#252526] text-[#86868b] hover:text-[#1d1d1f] dark:hover:text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {navItems.map(item => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setDockMenuOpen(false);
+                    }}
+                    className={`p-3.5 rounded-2xl border text-left transition flex items-center gap-3 cursor-pointer ${
+                      isActive
+                        ? 'bg-[#004b49] text-white border-[#004b49] shadow-sm'
+                        : 'bg-[#f5f5f7]/70 dark:bg-[#252526]/60 border-[#e8e8ed] dark:border-[#2d2d2f] text-[#1d1d1f] dark:text-white hover:border-[#004b49]/50'
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-[#004b49] dark:text-[#76b0b1]'}`} />
+                    <span className="text-xs font-bold truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#e8e8ed] dark:border-[#2d2d2f] text-xs">
+              <div className="flex items-center gap-2 text-[#86868b]">
+                <span>Active Node: <strong className="text-[#1d1d1f] dark:text-white">{activeProjName}</strong></span>
+                <span>•</span>
+                <span>Role: <strong className="uppercase text-[#004b49] dark:text-[#76b0b1]">{userRole}</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setDockMenuOpen(false);
+                    setHelperBotOpen(true);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#004b49] text-white font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>mOS Helper Bot</span>
+                </button>
+                <button
+                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                  className="px-3 py-1.5 rounded-xl bg-[#f5f5f7] dark:bg-[#252526] text-[#1d1d1f] dark:text-white font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  {theme === 'light' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+                  <span>{theme === 'light' ? 'Dark Theme' : 'Light Theme'}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    setDockMenuOpen(false);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#1d1d1f] dark:bg-white text-white dark:text-[#1d1d1f] font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowUp className="w-3.5 h-3.5" />
+                  <span>Return to Top</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GROUNDED MITIOR OS HELPER BOT (Retains Per-User Persistent Memory) */}
+      <MitiorHelperBot
+        isOpen={helperBotOpen}
+        onToggleOpen={setHelperBotOpen}
+        context={{
+          userId: currentUser?.id || 'acc-default',
+          userName: currentUser?.name || userName,
+          userEmail: currentUser?.email,
+          userRole: pinLockActive ? 'auditor' : userRole,
+          activeTab,
+          activeProjectName: activeProjName,
+          theme,
+          pinLockActive,
+          isAdminView: false,
+          counts: {
+            nodes: nodes.length,
+            playbooks: playbooks.length,
+            teamMembers: teamMembers.length,
+            scorecard: scorecard.length,
+            initiatives: sprintPlan.initiatives?.length || 0,
+            enquiries: enquiries.length,
+            projects: projects.length
+          }
+        }}
+        onExecuteAction={handleExecuteAssistantAction}
+      />
 
       {/* Mitior Desktop Installation Guidance Modal Popup overlay */}
       <DesktopInstallerModal 
@@ -1618,7 +2070,7 @@ export default function App() {
       )}
 
       {/* Humble Footer with zero margin fluff */}
-      <footer className="bg-white dark:bg-[#1d1d1f]/35 border-t border-slate-100 dark:border-[#2d2d2f] text-slate-400 py-6 text-center font-sans text-[11px] select-none text-xs">
+      <footer className="bg-white dark:bg-[#1d1d1f]/35 border-t border-slate-100 dark:border-[#2d2d2f] text-slate-400 py-5 pb-20 text-center font-sans text-[11px] select-none text-xs">
         <div className="w-full max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <span className="flex items-center gap-1.5">
             <Laptop className="w-3.5 h-3.5 text-slate-400" />

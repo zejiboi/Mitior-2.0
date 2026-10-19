@@ -37,7 +37,8 @@ import {
   ScorecardMetric, 
   SprintPlan, 
   ClarityCompass,
-  RecentActivity
+  RecentActivity,
+  UserRole
 } from '../types';
 import { Enquiry } from './EnquiriesView';
 import OnboardingWizard from './OnboardingWizard';
@@ -65,7 +66,7 @@ interface DashboardOverviewProps {
   onSelectPlaybook?: (id: string) => void;
   userName: string;
   setUserName: (name: string) => void;
-  userRole?: 'ceo' | 'employee';
+  userRole?: UserRole;
   activities?: RecentActivity[];
   onClearActivities?: () => void;
   onUpdateTeam?: (updated: TeamMember[]) => void;

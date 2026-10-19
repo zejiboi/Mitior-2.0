@@ -15,14 +15,14 @@ import {
   Undo,
   Redo
 } from 'lucide-react';
-import { ValueEngineNode, Playbook } from '../types';
+import { ValueEngineNode, Playbook, UserRole } from '../types';
 
 interface ValueEngineViewProps {
   nodes: ValueEngineNode[];
   playbooks: Playbook[];
   onUpdateNodes: (updatedNodes: ValueEngineNode[]) => void;
   onNavigateToPlaybook: (playbookId: string, title?: string, powerStageId?: string, powerStageLabel?: string) => void;
-  userRole?: 'ceo' | 'employee';
+  userRole?: UserRole;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -44,7 +44,7 @@ export default function ValueEngineView({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(nodes[0]?.id || null);
   const [isAddingNode, setIsAddingNode] = useState(false);
 
-  const isEmployee = userRole === 'employee';
+  const isEmployee = userRole === 'employee' || userRole === 'operator' || userRole === 'auditor';
 
   // Hotkey support for undo/redo
   useEffect(() => {

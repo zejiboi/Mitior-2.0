@@ -1,6 +1,5 @@
 {
-  "name": "Mitior OS",
-  "description": "design, map, and run your business operations.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Mitior OS (mOS)",
+  "description": "A local-first Business Operating System for designing Value Engines, managing Playbooks, aligning Team Accountabilities, and tracking weekly Scorecards and 90-Day Sprints.",
+  "requestFramePermissions": []
 }

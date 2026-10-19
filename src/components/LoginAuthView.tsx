@@ -1,15 +1,24 @@
 import React, { useState } from 'react';
-import { ShieldCheck, UserCheck, Key, UserPlus, Mail, Lock, ArrowLeft, RefreshCw, Sparkles } from 'lucide-react';
+import { ShieldCheck, UserCheck, Key, UserPlus, Mail, Lock, ArrowLeft, RefreshCw, Sparkles, Bot } from 'lucide-react';
+import MitiorHelperBot from './MitiorHelperBot';
+import { AssistantAction } from '../assistantEngine';
 
 interface LoginAuthViewProps {
-  onLoginSuccess: (account: { id: string; name: string; email: string; paidTicket?: "starter" | "enterprise" | "free" | null }, isNew?: boolean) => void;
+  onLoginSuccess: (
+    account: { id: string; name: string; email: string; paidTicket?: "starter" | "enterprise" | "free" | null },
+    isNew?: boolean,
+    isAdminLogin?: boolean
+  ) => void;
   onBackToLanding?: () => void;
   initialSignUp?: boolean;
+  initialAdminMode?: boolean;
 }
 
-export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initialSignUp }: LoginAuthViewProps) {
+export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initialSignUp, initialAdminMode }: LoginAuthViewProps) {
   const [isSignUp, setIsSignUp] = useState(initialSignUp || false);
+  const [isAdminLogin, setIsAdminLogin] = useState(initialAdminMode || false);
   const [isResetMode, setIsResetMode] = useState(false);
+  const [helperBotOpen, setHelperBotOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -37,30 +46,29 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
     localStorage.setItem('sOS_accounts', JSON.stringify(accounts));
   };
 
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const performAuthWithCredentials = async (targetEmail: string, targetPassword: string, forceAdmin = false) => {
     setErrorMsg('');
-
-    if (!email || !password) {
+    if (!targetEmail || !targetPassword) {
       setErrorMsg('Please enter both your email and password.');
       return;
     }
 
     let backendAuthError = '';
+    const cleanEmail = targetEmail.trim().toLowerCase();
 
     try {
       // 1. ATTEMPT REAL SECURE BACKEND LOGIN FIRST
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.toLowerCase(), password })
+        body: JSON.stringify({ email: cleanEmail, password: targetPassword })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         if (data.sessionToken) {
           localStorage.setItem("sOS_session_token", data.sessionToken);
         }
-        onLoginSuccess(data.user);
+        onLoginSuccess(data.user, false, forceAdmin || isAdminLogin);
         return;
       } else {
         backendAuthError = data.error || "Authentication failed.";
@@ -71,26 +79,33 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
     // 2. FALLBACK TO BROWSER LOCAL SANDBOX IF OFFLINE OR DISCREPANT
     const accounts = getAccounts();
-    const cleanEmail = email.trim().toLowerCase();
-
-    const match = accounts.find((a: any) => a.email.toLowerCase() === cleanEmail && a.password === password);
+    const match = accounts.find((a: any) => a.email.toLowerCase() === cleanEmail && a.password === targetPassword);
     if (match) {
-      onLoginSuccess({ id: match.id, name: match.name, email: match.email, paidTicket: (match.paidTicket || 'free') as any });
+      onLoginSuccess(
+        { id: match.id, name: match.name, email: match.email, paidTicket: (match.paidTicket || 'free') as any },
+        false,
+        forceAdmin || isAdminLogin
+      );
     } else {
-      if (cleanEmail === 'ryan@mitior.co' && password === 'password123') {
+      if (cleanEmail === 'ryan@mitior.co' && targetPassword === 'password123') {
         const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: 'ryan@mitior.co', paidTicket: 'enterprise' as const };
         const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'ryan@mitior.co');
         saveAccounts([ ...otherAccs, { ...defaultAcc, password: 'password123' } ]);
-        onLoginSuccess(defaultAcc);
-      } else if (cleanEmail === 'zejithefundi@gmail.com' && password === 'password123') {
+        onLoginSuccess(defaultAcc, false, forceAdmin || isAdminLogin);
+      } else if (cleanEmail === 'zejithefundi@gmail.com' && targetPassword === 'password123') {
         const defaultAcc = { id: 'acc-zeji', name: 'Zeji the Fundi', email: 'zejithefundi@gmail.com', paidTicket: 'enterprise' as const };
         const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'zejithefundi@gmail.com');
         saveAccounts([ ...otherAccs, { ...defaultAcc, password: 'password123' } ]);
-        onLoginSuccess(defaultAcc);
+        onLoginSuccess(defaultAcc, false, forceAdmin || isAdminLogin);
       } else {
         setErrorMsg(backendAuthError || 'Invalid email or password combination.');
       }
     }
+  };
+
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await performAuthWithCredentials(email, password, isAdminLogin);
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -167,15 +182,25 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
     }
 
     const cleanEmail = resetEmail.trim().toLowerCase();
-    let accountExists = false;
 
-    // Check defaults & localStorage profiles
-    const localAccounts = getAccounts();
-    if (cleanEmail === 'ryan@mitior.co' || cleanEmail === 'zejithefundi@gmail.com' || localAccounts.some((a: any) => a.email.toLowerCase() === cleanEmail)) {
-      accountExists = true;
+    try {
+      const res = await fetch("/api/auth/verify-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.recoveryCode) {
+        setSentCode(String(data.recoveryCode));
+        setResetStep(2);
+        setSuccessMsg('Server-verified recovery token dispatched safely!');
+        return;
+      }
+    } catch (err) {
+      console.warn("Backend recovery code service offline, using local sandbox OTP.", err);
     }
 
-    // We allow requesting code and verify on backend or local save. Let's send simulated verification.
+    // Fallback to local sandbox OTP if backend is offline
     const mockOtp = Math.floor(100000 + Math.random() * 900000).toString();
     setSentCode(mockOtp);
     setResetStep(2);
@@ -211,11 +236,15 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
     const cleanEmail = resetEmail.trim().toLowerCase();
 
     try {
-      // 1. ATTEMPT LIVE BACKEND SECURE PASS REWRITE
+      // 1. ATTEMPT LIVE BACKEND SECURE PASS REWRITE WITH VERIFIED RECOVERY CODE
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: cleanEmail, password: newPassword })
+        body: JSON.stringify({
+          email: cleanEmail,
+          password: newPassword,
+          recoveryCode: verificationCode.trim()
+        })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -231,6 +260,9 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
           setEmail(cleanEmail);
           setSuccessMsg('');
         }, 2200);
+        return;
+      } else if (res.status === 401 || res.status === 400) {
+        setErrorMsg(data.error || 'Password reset rejected by server.');
         return;
       }
     } catch (err) {
@@ -435,22 +467,134 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
           </div>
         ) : (
-          // STANDARD LOGIN / REGISTRATION UI CODE
+          // STANDARD LOGIN / ADMIN LOGIN / REGISTRATION UI CODE
           <>
+            {/* Mode Switcher: Operator Sign In | Admin Login | Sign Up */}
+            <div className="grid grid-cols-3 gap-1 bg-[#f5f5f7] dark:bg-[#252526] p-1 rounded-2xl border border-[#e8e8ed] dark:border-[#2d2d2f]">
+              <button
+                type="button"
+                id="auth-tab-signin"
+                onClick={() => {
+                  setIsSignUp(false);
+                  setIsAdminLogin(false);
+                  setErrorMsg('');
+                }}
+                className={`py-1.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                  !isSignUp && !isAdminLogin
+                    ? 'bg-white dark:bg-[#1d1d1f] text-[#1d1d1f] dark:text-white shadow-2xs'
+                    : 'text-[#86868b] hover:text-[#1d1d1f] dark:hover:text-white'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                id="auth-tab-admin"
+                onClick={() => {
+                  setIsSignUp(false);
+                  setIsAdminLogin(true);
+                  setErrorMsg('');
+                }}
+                className={`py-1.5 rounded-xl text-[11px] font-bold transition cursor-pointer flex items-center justify-center gap-1 ${
+                  isAdminLogin && !isSignUp
+                    ? 'bg-[#004b49] text-white shadow-2xs'
+                    : 'text-[#86868b] hover:text-[#004b49] dark:hover:text-[#95d1ce]'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin Login</span>
+              </button>
+              <button
+                type="button"
+                id="auth-tab-signup"
+                onClick={() => {
+                  setIsSignUp(true);
+                  setIsAdminLogin(false);
+                  setErrorMsg('');
+                }}
+                className={`py-1.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                  isSignUp
+                    ? 'bg-white dark:bg-[#1d1d1f] text-[#1d1d1f] dark:text-white shadow-2xs'
+                    : 'text-[#86868b] hover:text-[#1d1d1f] dark:hover:text-white'
+                }`}
+              >
+                Sign Up
+              </button>
+            </div>
+
             {/* Brand Header */}
             <div className="text-center space-y-2">
-              <div className="mx-auto w-12 h-12 bg-[#1d1d1f] dark:bg-[#f5f5f7] text-white dark:text-[#1d1d1f] rounded-2xl flex items-center justify-center shadow-md">
+              <div className={`mx-auto w-12 h-12 rounded-2xl flex items-center justify-center shadow-md ${
+                isAdminLogin && !isSignUp
+                  ? 'bg-[#004b49] text-white'
+                  : 'bg-[#1d1d1f] dark:bg-[#f5f5f7] text-white dark:text-[#1d1d1f]'
+              }`}>
                 <ShieldCheck className="w-6 h-6" />
               </div>
-              <h2 className="text-2xl font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
-                {isSignUp ? 'Create SaaS Account' : 'Mitior OS System Suite'}
+              <h2 className="text-2xl font-display font-bold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
+                {isSignUp
+                  ? 'Create SaaS Account'
+                  : isAdminLogin
+                    ? 'Executive Admin Portal'
+                    : 'Mitior OS System Suite'}
               </h2>
               <p className="text-xs text-[#86868b] dark:text-[#8e8e93] max-w-xs mx-auto">
                 {isSignUp 
                   ? 'Join our modern local operating system to configure, refine, and run your business playbook workflows.' 
-                  : 'Secure, local-first system workspace. Sign in or sign up to begin.'}
+                  : isAdminLogin
+                    ? 'Direct Administrator authentication with full RBAC governance and persistent mOS Helper Bot memory.'
+                    : 'Secure, local-first system workspace. Sign in or sign up to begin.'}
               </p>
             </div>
+
+            {/* Admin Quick-Login Presets when in Admin Login mode */}
+            {isAdminLogin && !isSignUp && (
+              <div className="p-3.5 rounded-2xl bg-[#004b49]/5 dark:bg-[#76b0b1]/10 border border-[#004b49]/20 dark:border-[#76b0b1]/25 space-y-2.5 text-left">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-[#004b49] dark:text-[#76b0b1]">
+                    Verified Admin Node Credentials
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setHelperBotOpen(true)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#004b49] text-white text-[10px] font-bold cursor-pointer hover:opacity-90 transition"
+                  >
+                    <Bot className="w-3 h-3" />
+                    <span>Helper Bot</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    id="admin-quick-login-ceo"
+                    onClick={() => {
+                      setEmail('ryan@mitior.co');
+                      setPassword('password123');
+                      performAuthWithCredentials('ryan@mitior.co', 'password123', true);
+                    }}
+                    className="p-2.5 rounded-xl bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] hover:border-[#004b49] text-left transition cursor-pointer"
+                  >
+                    <span className="text-[10px] font-mono font-bold text-[#004b49] dark:text-[#76b0b1] block">CEO ADMIN</span>
+                    <span className="text-xs font-bold text-[#1d1d1f] dark:text-white block truncate">Ryan Deiss</span>
+                    <span className="text-[10px] text-[#86868b] font-mono block truncate">ryan@mitior.co</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="admin-quick-login-fundi"
+                    onClick={() => {
+                      setEmail('zejithefundi@gmail.com');
+                      setPassword('password123');
+                      performAuthWithCredentials('zejithefundi@gmail.com', 'password123', true);
+                    }}
+                    className="p-2.5 rounded-xl bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] hover:border-[#004b49] text-left transition cursor-pointer"
+                  >
+                    <span className="text-[10px] font-mono font-bold text-[#004b49] dark:text-[#76b0b1] block">FUNDI ADMIN</span>
+                    <span className="text-xs font-bold text-[#1d1d1f] dark:text-white block truncate">Zeji the Fundi</span>
+                    <span className="text-[10px] text-[#86868b] font-mono block truncate">zejithefundi@gmail.com</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Inputs Form */}
             <form onSubmit={isSignUp ? handleSignUp : handleSignIn} className="space-y-4">
@@ -527,24 +671,44 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
               <button
                 type="submit"
-                className="w-full bg-[#1d1d1f] hover:bg-neutral-800 dark:bg-[#f5f5f7] dark:hover:bg-white text-white dark:text-[#1d1d1f] font-semibold rounded-xl py-2.5 text-xs transition duration-150 cursor-pointer"
+                className={`w-full font-semibold rounded-xl py-2.5 text-xs transition duration-150 cursor-pointer ${
+                  isAdminLogin && !isSignUp
+                    ? 'bg-[#004b49] hover:bg-[#003836] text-white'
+                    : 'bg-[#1d1d1f] hover:bg-neutral-800 dark:bg-[#f5f5f7] dark:hover:bg-white text-white dark:text-[#1d1d1f]'
+                }`}
               >
-                {isSignUp ? 'Generate System Account' : 'Authenticate Credentials'}
+                {isSignUp
+                  ? 'Generate System Account'
+                  : isAdminLogin
+                    ? 'Authenticate Admin Session'
+                    : 'Authenticate Credentials'}
               </button>
             </form>
 
-            {/* Dynamic Redirect Info */}
+            {/* Dynamic Redirect Info & Helper Bot Trigger */}
             <div className="text-center pt-2 space-y-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSignUp(!isSignUp);
-                  setErrorMsg('');
-                }}
-                className="text-xs text-[#1d1d1f] dark:text-white font-medium hover:underline cursor-pointer block w-full text-center"
-              >
-                {isSignUp ? 'Already have an operating account? Sign In' : 'Need a separate company partition? Sign Up'}
-              </button>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSignUp(!isSignUp);
+                    setIsAdminLogin(false);
+                    setErrorMsg('');
+                  }}
+                  className="text-xs text-[#1d1d1f] dark:text-white font-medium hover:underline cursor-pointer"
+                >
+                  {isSignUp ? 'Already have an operating account? Sign In' : 'Need a separate company partition? Sign Up'}
+                </button>
+                <span className="text-neutral-300 dark:text-neutral-700">•</span>
+                <button
+                  type="button"
+                  onClick={() => setHelperBotOpen(true)}
+                  className="text-xs text-[#004b49] dark:text-[#76b0b1] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>mOS Helper Bot</span>
+                </button>
+              </div>
 
               {onBackToLanding && (
                 <div className="pt-2 border-t border-[#f2f2f7] dark:border-neutral-800">
@@ -562,6 +726,31 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
         )}
 
       </div>
+
+      {/* Persistent Grounded Mitior Helper Bot accessible from Login & Admin Login */}
+      <MitiorHelperBot
+        isOpen={helperBotOpen}
+        onToggleOpen={setHelperBotOpen}
+        context={{
+          userId: email.trim().toLowerCase() === 'zejithefundi@gmail.com' ? 'acc-zeji' : 'acc-default',
+          userName: isAdminLogin ? 'Executive Administrator' : 'Operator',
+          userRole: 'ceo',
+          activeTab: 'login',
+          activeProjectName: 'Admin Authentication Gate',
+          isAdminView: true
+        }}
+        onExecuteAction={(action: AssistantAction) => {
+          if (action.type === 'admin_quick_login' && action.payload) {
+            const targetMail = String(action.payload.email || 'ryan@mitior.co');
+            const targetPass = String(action.payload.password || 'password123');
+            setIsSignUp(false);
+            setIsAdminLogin(true);
+            setEmail(targetMail);
+            setPassword(targetPass);
+            performAuthWithCredentials(targetMail, targetPass, true);
+          }
+        }}
+      />
     </div>
   );
 }

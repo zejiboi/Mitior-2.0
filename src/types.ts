@@ -87,11 +87,14 @@ export interface SprintPlan {
   initiatives: SprintInitiative[];
 }
 
+export type UserRole = 'ceo' | 'fundi' | 'operator' | 'auditor' | 'employee';
+
 export interface ClarityCompass {
   threeYearTarget: string; // COMPANY CASE
   purposeStatement: string; // CUSTOMER CASE
   coreValues: string[]; // CULTURE CASE
   strategicAnchors: string[]; // COMPETITIVE CASE
+  evaluations?: DecisionEvaluation[];
 }
 
 export interface DecisionEvaluation {

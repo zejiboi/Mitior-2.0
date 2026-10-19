@@ -74,6 +74,7 @@ export default function EnquiriesView({ enquiries, onUpdateEnquiries }: Enquirie
   });
 
   const [apiLogs, setApiLogs] = useState<string[]>(['[System]: Email Router Gateway operational. Ready for API injection.']);
+  const [configSavedBanner, setConfigSavedBanner] = useState<string | null>(null);
 
   const addApiLog = (msg: string) => {
     setApiLogs(prev => [`[${new Date().toLocaleTimeString()}]: ${msg}`, ...prev].slice(0, 8));
@@ -82,7 +83,8 @@ export default function EnquiriesView({ enquiries, onUpdateEnquiries }: Enquirie
   const handleSaveConfig = () => {
     localStorage.setItem('s_email_api_config', JSON.stringify(apiConfig));
     addApiLog(`Configuration saved. Active Mail Routing Provider changed to ${apiConfig.provider.toUpperCase()}`);
-    alert("Connection specifications updated and stored locally.");
+    setConfigSavedBanner("Connection specifications updated and stored locally.");
+    setTimeout(() => setConfigSavedBanner(null), 3500);
   };
 
   const activeEnquiry = enquiries.find(e => e.id === activeEnquiryId) || enquiries[0];
@@ -244,7 +246,23 @@ export default function EnquiriesView({ enquiries, onUpdateEnquiries }: Enquirie
   );
 
   return (
-    <div className="space-y-8 animate-fade-in font-sans pb-12">
+    <div className="space-y-6 animate-fade-in font-sans pb-10">
+      {configSavedBanner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-emerald-300 text-xs font-semibold"
+        >
+          <span>{configSavedBanner}</span>
+          <button
+            type="button"
+            onClick={() => setConfigSavedBanner(null)}
+            className="text-[10px] font-mono uppercase underline cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       
       {/* Header Banner */}
       <div className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] p-6 rounded-2xl shadow-sm space-y-1">

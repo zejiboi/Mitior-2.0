@@ -193,6 +193,14 @@ export default function TeamCanvasView({
   const [newMemberPhoto, setNewMemberPhoto] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
   const [newMemberIsVacant, setNewMemberIsVacant] = useState(false);
+  const [inlineBanner, setInlineBanner] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+
+  const showInlineBanner = (text: string, type: 'error' | 'success' = 'error') => {
+    setInlineBanner({ type, text });
+    setTimeout(() => {
+      setInlineBanner(prev => (prev?.text === text ? null : prev));
+    }, 4000);
+  };
   
   const [ceoEmail, setCeoEmail] = useState(() => {
     const saved = localStorage.getItem('sOS_current_account');
@@ -243,7 +251,7 @@ export default function TeamCanvasView({
 
   const processCeoFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file (PNG/JPG).');
+      showInlineBanner('Please upload a valid image file (PNG/JPG).', 'error');
       return;
     }
     const reader = new FileReader();
@@ -299,7 +307,7 @@ export default function TeamCanvasView({
 
   const processFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file (PNG/JPG).');
+      showInlineBanner('Please upload a valid image file (PNG/JPG).', 'error');
       return;
     }
     const reader = new FileReader();
@@ -361,7 +369,7 @@ export default function TeamCanvasView({
   const handleDeleteMember = (memberId: string) => {
     const member = teamMembers.find(m => m.id === memberId);
     if (member?.isFounder) {
-      alert("Cannot delete the Founder profile constraint.");
+      showInlineBanner("Cannot delete the Founder profile constraint.", 'error');
       return;
     }
     const updated = teamMembers.filter(m => m.id !== memberId);
@@ -619,7 +627,26 @@ export default function TeamCanvasView({
   };
 
   return (
-    <div className="space-y-10 animate-fade-in font-sans pb-12">
+    <div className="space-y-8 animate-fade-in font-sans pb-10">
+      {inlineBanner && (
+        <div
+          role="alert"
+          className={`flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl border text-xs font-semibold ${
+            inlineBanner.type === 'error'
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-800 dark:text-rose-300'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+          }`}
+        >
+          <span>{inlineBanner.text}</span>
+          <button
+            type="button"
+            onClick={() => setInlineBanner(null)}
+            className="text-[10px] font-mono uppercase underline cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       
       {/* Premium Operations Control & Roster Backup Deck */}
       <div className="bg-white border border-[#e8e8ed] rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">

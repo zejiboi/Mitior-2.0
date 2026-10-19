@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Shield, Users, ArrowRight, Building2, Sparkles, Laptop } from 'lucide-react';
+import { UserRole } from '../types';
 
 interface WorkspaceSelectorViewProps {
   userName: string;
   onSetupComplete: (setup: {
-    role: 'ceo' | 'employee';
+    role: UserRole;
     workspaceName: string;
     workspaceDesc: string;
     shouldPreloadData: boolean;
+    syncedWorkspaceData?: any;
   }) => void;
 }
 
@@ -17,6 +19,7 @@ export default function WorkspaceSelectorView({
   onSetupComplete
 }: WorkspaceSelectorViewProps) {
   const [selectedRole, setSelectedRole] = useState<'ceo' | 'employee' | null>(null);
+  const [specificGovernanceRole, setSpecificGovernanceRole] = useState<UserRole>('ceo');
 
   // CEO Form states
   const [companyName, setCompanyName] = useState(`${userName}'s Workspace`);
@@ -32,6 +35,7 @@ export default function WorkspaceSelectorView({
     creatorName: string;
     projectId: string;
     description: string;
+    workspaceData?: any;
   } | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
 
@@ -54,7 +58,8 @@ export default function WorkspaceSelectorView({
             projectName: data.projectName,
             creatorName: data.creatorName,
             projectId: data.projectId,
-            description: data.description
+            description: data.description,
+            workspaceData: data.workspaceData || null
           });
         } else {
           setVerificationResult(null);
@@ -75,14 +80,16 @@ export default function WorkspaceSelectorView({
     if (!selectedRole) return;
 
     if (selectedRole === 'ceo') {
+      const effectiveRole: UserRole = (specificGovernanceRole === 'ceo' || specificGovernanceRole === 'fundi') ? specificGovernanceRole : 'ceo';
       onSetupComplete({
-        role: 'ceo',
+        role: effectiveRole,
         workspaceName: companyName.trim() || `${userName}'s Workspace`,
         workspaceDesc: companyDesc.trim() || 'Custom operating workspace.',
-        shouldPreloadData: true // Always initialize all data
+        shouldPreloadData: true
       });
     } else {
-      // Employee role joining a workspace
+      // Operator / Auditor role joining a workspace
+      const effectiveRole: UserRole = (specificGovernanceRole === 'operator' || specificGovernanceRole === 'auditor') ? specificGovernanceRole : 'operator';
       const joinedName = verificationResult
         ? `${verificationResult.projectName} Node`
         : (customWorkspaceCode.trim() 
@@ -94,10 +101,11 @@ export default function WorkspaceSelectorView({
         : "Secure employee operational node. Action privileges restricted.";
 
       onSetupComplete({
-        role: 'employee',
+        role: effectiveRole,
         workspaceName: joinedName,
         workspaceDesc: joinedDesc,
-        shouldPreloadData: true // Always initialize all data
+        shouldPreloadData: true,
+        syncedWorkspaceData: verificationResult?.workspaceData || null
       });
     }
   };
@@ -221,10 +229,31 @@ export default function WorkspaceSelectorView({
             {/* CEO Custom Configuration Form */}
             {selectedRole === 'ceo' && (
               <div className="space-y-5">
-                <h3 className="text-sm font-display font-bold text-[#05161a] dark:text-white flex items-center gap-2 tracking-tight">
-                  <Building2 className="w-4 h-4 text-[#004b49] dark:text-[#76b0b1]" />
-                  Administrator Workspace Settings
-                </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <h3 className="text-sm font-display font-bold text-[#05161a] dark:text-white flex items-center gap-2 tracking-tight">
+                    <Building2 className="w-4 h-4 text-[#004b49] dark:text-[#76b0b1]" />
+                    Administrator Workspace Settings
+                  </h3>
+                  <div className="flex items-center gap-1.5 bg-neutral-100 dark:bg-[#05161a] p-1 rounded-xl border border-[#e8e8ed] dark:border-[#3f4948]">
+                    {[
+                      { id: 'ceo' as UserRole, label: 'CEO (Executive)' },
+                      { id: 'fundi' as UserRole, label: 'Fundi (Architect)' }
+                    ].map(r => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setSpecificGovernanceRole(r.id)}
+                        className={`px-3 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                          (specificGovernanceRole === r.id || (specificGovernanceRole !== 'fundi' && r.id === 'ceo'))
+                            ? 'bg-[#004b49] dark:bg-[#76b0b1] text-white dark:text-[#05161a]'
+                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-xs font-sans">
                   <div className="space-y-1.5">
@@ -255,14 +284,35 @@ export default function WorkspaceSelectorView({
             {/* Employee Joining Form */}
             {selectedRole === 'employee' && (
               <div className="space-y-5">
-                <div className="space-y-1">
-                  <h3 className="text-sm font-display font-bold text-[#05161a] dark:text-white flex items-center gap-2 tracking-tight">
-                    <Laptop className="w-4 h-4 text-[#004b49] dark:text-[#76b0b1]" />
-                    Connect Workspace Node
-                  </h3>
-                  <p className="text-[11px] text-[#4f5e61] dark:text-[#899391]">
-                    Synergy starts here. Enter a valid Synchronization Code issued by your Administrator to download shared playbooks and track operational vitals.
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-display font-bold text-[#05161a] dark:text-white flex items-center gap-2 tracking-tight">
+                      <Laptop className="w-4 h-4 text-[#004b49] dark:text-[#76b0b1]" />
+                      Connect Workspace Node
+                    </h3>
+                    <p className="text-[11px] text-[#4f5e61] dark:text-[#899391]">
+                      Synergy starts here. Enter a valid Synchronization Code issued by your Administrator to download shared playbooks and track operational vitals.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-neutral-100 dark:bg-[#05161a] p-1 rounded-xl border border-[#e8e8ed] dark:border-[#3f4948] shrink-0">
+                    {[
+                      { id: 'operator' as UserRole, label: 'Operator (Staff)' },
+                      { id: 'auditor' as UserRole, label: 'Auditor (Read-Only)' }
+                    ].map(r => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setSpecificGovernanceRole(r.id)}
+                        className={`px-3 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                          (specificGovernanceRole === r.id || (specificGovernanceRole !== 'auditor' && r.id === 'operator'))
+                            ? 'bg-[#004b49] dark:bg-[#76b0b1] text-white dark:text-[#05161a]'
+                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Custom code entry */}
