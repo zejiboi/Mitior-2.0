@@ -2,6 +2,15 @@
 
 > **Philosophy**: Absolute data sovereignty, offline-first responsiveness, and commercial SaaS scalability in a single unified architecture.
 
+## 🌐 Live Production Deployment (Ubuntu VM + Let's Encrypt HTTPS)
+
+- **Primary HTTPS FQDN (`sslip.io`)**: **[https://mitior.102.164.62.65.sslip.io](https://mitior.102.164.62.65.sslip.io)**
+- **Secondary HTTPS FQDN (`nip.io`)**: **[https://mitior-os.102-164-62-65.nip.io](https://mitior-os.102-164-62-65.nip.io)**
+- **Direct Server IP**: **[http://102.164.62.65](http://102.164.62.65)**
+- **Health Check API**: **[https://mitior.102.164.62.65.sslip.io/api/health](https://mitior.102.164.62.65.sslip.io/api/health)**
+
+---
+
 Mitior OS is a professional, high-performance operating system designed for business owners, project leads, and creators to **design, map, and execute company operations**. Combining strategic alignment toolsets with agile execution canvases, Mitior OS lets you model company structures, document standard operating procedures (SOPs), track financial values, and drive focus across teams.
 
 It is uniquely engineered to run **offline-first as a native desktop application** or to be deployed instantly as a multi-tenant, revenue-generating **B2B SaaS application** on public cloud infrastructure.

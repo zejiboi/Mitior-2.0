@@ -73,3 +73,20 @@ Run the automated installation and health verification script at any time:
 ```bash
 bash scripts/verify-installation.sh
 ```
+
+---
+
+## 6. Ubuntu VM Production Deployment (`102.164.62.65`)
+
+- **Primary HTTPS FQDN**: `https://mitior.102.164.62.65.sslip.io`
+- **Secondary HTTPS FQDN**: `https://mitior-os.102-164-62-65.nip.io`
+- **Direct IP**: `http://102.164.62.65`
+- **Application Directory**: `/opt/mitior`
+- **Systemd Service**: `/etc/systemd/system/mitior.service` (`NODE_ENV=production PORT=3000 /usr/bin/node /opt/mitior/dist/server.cjs`)
+- **Reverse Proxy & Auto-TLS**: Caddy 2 (`/etc/caddy/Caddyfile`) with automatic Let's Encrypt HTTPS certificates.
+
+### Updating the Production VM from GitHub:
+```bash
+cd /opt/mitior && git pull origin main && npm ci && npm run build && sudo systemctl restart mitior.service
+```
+
