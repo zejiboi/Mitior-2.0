@@ -107,31 +107,54 @@
   --font-display: var(--font-display);
   --font-mono: "JetBrains Mono", monospace;
   
-  /* Accent colors mapped to the Emerald visual identity */
-  --color-indigo-50: var(--bg-neutral-50-override);
-  --color-indigo-100: var(--bg-neutral-200-override);
-  --color-indigo-500: #76b0b1;
-  --color-indigo-600: var(--bg-accent);
-  --color-indigo-700: #95d1ce;
-  --color-indigo-800: #b1eeea;
-  --color-indigo-900: #ffffff;
+  /* Strict 3-color Palette */
+  --color-primary: #1d1d1f;
+  --color-secondary: #86868b;
+  --color-accent: #004b49;
 
-  --color-blue-50: var(--bg-neutral-50-override);
-  --color-blue-100: var(--bg-neutral-200-override);
-  --color-blue-500: #76b0b1;
-  --color-blue-600: var(--bg-accent);
-  --color-blue-700: #95d1ce;
-  --color-blue-800: #b1eeea;
-  --color-blue-900: #ffffff;
+  /* Accent & Legacy Color Mappings to Strict 3-Color Palette */
+  --color-indigo-50: #f5f5f7;
+  --color-indigo-100: #e8e8ed;
+  --color-indigo-500: #004b49;
+  --color-indigo-600: #004b49;
+  --color-indigo-700: #003735;
+  --color-indigo-800: #002625;
+  --color-indigo-900: #1d1d1f;
+
+  --color-purple-50: #f5f5f7;
+  --color-purple-100: #e8e8ed;
+  --color-purple-500: #004b49;
+  --color-purple-600: #004b49;
+  --color-purple-700: #003735;
+
+  --color-blue-50: #f5f5f7;
+  --color-blue-100: #e8e8ed;
+  --color-blue-500: #004b49;
+  --color-blue-600: #004b49;
+  --color-blue-700: #003735;
+  --color-blue-800: #002625;
+  --color-blue-900: #1d1d1f;
   
-  --color-emerald-500: #00bfa5;
+  --color-emerald-50: #f5f5f7;
+  --color-emerald-100: #e8e8ed;
+  --color-emerald-500: #004b49;
   --color-emerald-600: #004b49;
   --color-emerald-700: #003735;
+
+  --color-rose-50: #f5f5f7;
+  --color-rose-100: #e8e8ed;
+  --color-rose-500: #1d1d1f;
+  --color-rose-600: #1d1d1f;
+
+  --color-amber-50: #f5f5f7;
+  --color-amber-100: #e8e8ed;
+  --color-amber-500: #004b49;
+  --color-amber-600: #004b49;
   
   --color-apple-gray-50: var(--bg-primary);
   --color-apple-gray-100: var(--border-primary);
   --color-apple-gray-200: var(--bg-quaternary);
-  --color-apple-gray-650: #76b0b1;
+  --color-apple-gray-650: #86868b;
   --color-apple-gray-600: var(--text-secondary);
   --color-apple-gray-900: var(--text-primary);
 }

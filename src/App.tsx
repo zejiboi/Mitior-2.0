@@ -61,10 +61,13 @@ import WorkspaceSelectorView from './components/WorkspaceSelectorView';
 import DesktopInstallerModal from './components/DesktopInstallerModal';
 import CheckoutPortal from './components/CheckoutPortal';
 import MitiorHelperBot from './components/MitiorHelperBot';
+import LanguageSelector from './components/LanguageSelector';
+import { useLanguage } from './LanguageContext';
 import { AssistantAction } from './assistantEngine';
 
 
 export default function App() {
+  const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [dockMenuOpen, setDockMenuOpen] = useState<boolean>(false);
@@ -1183,18 +1186,18 @@ export default function App() {
     }, 100);
   };
 
-  // Nav Items with dynamic Inbox, Config, and 10. SRS Specs links integrated
+  // Nav Items with simple plain language and translations
   const navItems = [
-    { id: 'overview', label: 'Home Node', icon: Home },
-    { id: 'engines', label: '1. Value Engines', icon: Layers },
-    { id: 'playbooks', label: '2. Playbooks/SOP', icon: FileText },
-    { id: 'team', label: '3. Team Canvas', icon: Users },
-    { id: 'scorecard', label: '4. Scorecard', icon: TrendingUp },
-    { id: 'sprint', label: '5. Sprints & Rhythms', icon: Calendar },
-    { id: 'compass', label: '6. Clarity Compass', icon: Compass },
-    { id: 'enquiries', label: '8. Enquiries', icon: Inbox },
-    { id: 'settings', label: '7. Settings', icon: Settings },
-    { id: 'srs', label: '10. SRS Specs', icon: BookOpen },
+    { id: 'overview', label: t('nav.home', 'Home'), icon: Home },
+    { id: 'engines', label: t('nav.engines', '1. How It Works (Flow)'), icon: Layers },
+    { id: 'playbooks', label: t('nav.playbooks', '2. Checklists & SOPs'), icon: FileText },
+    { id: 'team', label: t('nav.team', '3. Team & Roles'), icon: Users },
+    { id: 'scorecard', label: t('nav.scorecard', '4. Weekly Numbers'), icon: TrendingUp },
+    { id: 'sprint', label: t('nav.sprint', '5. 90-Day Goals'), icon: Calendar },
+    { id: 'compass', label: t('nav.compass', '6. Company Vision'), icon: Compass },
+    { id: 'enquiries', label: t('nav.enquiries', '8. Customer Messages'), icon: Inbox },
+    { id: 'settings', label: t('nav.settings', '7. Settings & Backup'), icon: Settings },
+    { id: 'srs', label: t('nav.srs', '10. System Specs'), icon: BookOpen },
   ];
 
   // Intercept authentication flow with Landing page first
@@ -1299,17 +1302,17 @@ export default function App() {
 
   const getHeaderInfo = (tabId: string) => {
     switch (tabId) {
-      case 'overview': return { title: 'Home Node', subtitle: 'Executive dashboard, real-time activity log, and business vitals.' };
-      case 'engines': return { title: 'Value Engines Builder', subtitle: 'Design lead flows and fulfillment pipelines to automate growth scale.' };
-      case 'playbooks': return { title: 'Playbooks & SOP Library', subtitle: 'Standard operating procedures and interactive benchmark checklists.' };
-      case 'team': return { title: 'Team Canvas Organogram', subtitle: 'Assign structural accountabilities and view active team operators.' };
-      case 'scorecard': return { title: 'Vitals Scorecard', subtitle: 'Track metrics, KPIs, and operational goals with historical review.' };
-      case 'sprint': return { title: 'Sprints & Rhythms', subtitle: 'Quarterly rock plan, 13-week sprints, and standard meeting schedules.' };
-      case 'compass': return { title: 'Clarity Compass', subtitle: 'Formulate your mission, strategic vision, purpose, values, and 4C decisions.' };
-      case 'enquiries': return { title: 'Workspace Enquiries', subtitle: 'Incoming messages, feedback loops, and customer service channels.' };
-      case 'settings': return { title: 'System Settings', subtitle: 'Manage workspaces, local imports/exports, security credentials, and offline installer options.' };
-      case 'srs': return { title: '10. SRS Specification (IEEE 830)', subtitle: 'Interactive Software Requirements Specification, traceability matrix, and data schemas.' };
-      default: return { title: 'Mitior OS Workspace', subtitle: 'Modern offline-first business template orchestrator.' };
+      case 'overview': return { title: t('header.home.title', 'Home Overview'), subtitle: t('header.home.sub', 'See company numbers, recent activity, and quick shortcuts.') };
+      case 'engines': return { title: t('header.engines.title', 'How Business Works (Flow)'), subtitle: t('header.engines.sub', 'Map how you get customers and how you deliver your work.') };
+      case 'playbooks': return { title: t('header.playbooks.title', 'Checklists & Guides (SOPs)'), subtitle: t('header.playbooks.sub', 'Simple step-by-step instructions so work is done right every time.') };
+      case 'team': return { title: t('header.team.title', 'Team & Roles'), subtitle: t('header.team.sub', 'See who is responsible for what job in the company.') };
+      case 'scorecard': return { title: t('header.scorecard.title', 'Weekly Numbers (Scorecard)'), subtitle: t('header.scorecard.sub', 'Track your most important numbers each week to stay on target.') };
+      case 'sprint': return { title: t('header.sprint.title', '90-Day Goals & Meetings'), subtitle: t('header.sprint.sub', 'Focus on key quarterly goals and simple weekly team check-ins.') };
+      case 'compass': return { title: t('header.compass.title', 'Company Vision (Compass)'), subtitle: t('header.compass.sub', 'Your big 3-year goal, purpose, values, and why customers choose you.') };
+      case 'enquiries': return { title: t('header.enquiries.title', 'Customer Messages'), subtitle: t('header.enquiries.sub', 'Incoming requests, questions, and customer contact notes.') };
+      case 'settings': return { title: t('header.settings.title', 'Settings & Backup'), subtitle: t('header.settings.sub', 'Save your data, change workspaces, and manage your account.') };
+      case 'srs': return { title: '10. System Requirements (SRS)', subtitle: 'Requirements specification, data schemas, and architecture.' };
+      default: return { title: 'Mitior OS', subtitle: 'Simple business operating system.' };
     }
   };
 
@@ -1348,7 +1351,7 @@ export default function App() {
               <select
                 value={activeProjectId}
                 onChange={(e) => handleSwitchProject(e.target.value)}
-                className="w-full bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl py-1.5 pl-3 pr-8 outline-none appearance-none cursor-pointer focus:border-indigo-500 transition shadow-2xs"
+                className="w-full bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl py-1.5 pl-3 pr-8 outline-none appearance-none cursor-pointer focus:border-[#004b49] transition shadow-2xs"
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -1377,7 +1380,7 @@ export default function App() {
                 }`}
                 title={sidebarCollapsed ? item.label : undefined}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#e6b349] dark:text-[#2d4df5] scale-105' : 'text-[#86868b]'}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#004b49] dark:text-[#95d1ce] scale-105' : 'text-[#86868b]'}`} />
                 {!sidebarCollapsed && <span className="animate-duration-150 truncate">{item.label}</span>}
               </button>
             );
@@ -1401,8 +1404,8 @@ export default function App() {
                 sidebarCollapsed ? 'p-2 justify-center rounded-lg' : 'px-3 py-1.5 rounded-xl text-[11px]'
               } ${
                 pinLockActive 
-                  ? 'bg-amber-50/50 dark:bg-amber-950/10 border-amber-200/60 text-amber-700 dark:text-amber-400' 
-                  : 'bg-emerald-50/50 dark:bg-emerald-950/10 border-emerald-200/60 text-emerald-700 dark:text-emerald-400'
+                  ? 'bg-[#f5f5f7] dark:bg-[#252526] border-[#e8e8ed] dark:border-[#2d2d2f] text-[#86868b] dark:text-[#8e8e93]' 
+                  : 'bg-[#004b49]/10 dark:bg-[#95d1ce]/20 border-[#004b49]/20 dark:border-[#95d1ce]/30 text-[#004b49] dark:text-[#95d1ce]'
               }`}
               title={pinLockActive ? "Unlock corporate templates" : "Lock corporate templates"}
             >
@@ -1422,7 +1425,7 @@ export default function App() {
           <div className={`flex items-center justify-between ${sidebarCollapsed ? 'flex-col gap-2' : 'gap-2'}`}>
             <div className="flex items-center gap-2 text-left min-w-0">
               <div 
-                className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-black text-xs flex items-center justify-center shrink-0 cursor-pointer"
+                className="w-7 h-7 rounded-lg bg-[#004b49] dark:bg-[#95d1ce] text-white dark:text-[#003735] font-black text-xs flex items-center justify-center shrink-0 cursor-pointer"
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                 title={currentUser?.name || 'Ryan Deiss'}
               >
@@ -1458,7 +1461,7 @@ export default function App() {
               sidebarCollapsed ? (
                 <div className="text-center text-[10px]" title="Enterprise Local App">🌟</div>
               ) : (
-                <div className="bg-gradient-to-r from-amber-500 to-yellow-500 text-white text-[9px] font-black uppercase tracking-wider py-1 px-2 rounded-xl shadow-xs text-center">
+                <div className="bg-[#004b49] dark:bg-[#95d1ce] text-white dark:text-[#003735] text-[9px] font-black uppercase tracking-wider py-1 px-2 rounded-xl shadow-xs text-center">
                   🌟 Enterprise Local App
                 </div>
               )
@@ -1466,14 +1469,14 @@ export default function App() {
               sidebarCollapsed ? (
                 <div className="text-center text-[10px]" title="Web App Tier ($15)">🌐</div>
               ) : (
-                <div className="bg-indigo-600 text-white text-[9px] font-black uppercase tracking-wider py-1 rounded-xl shadow-xs text-center">
+                <div className="bg-[#004b49] dark:bg-[#95d1ce] text-white dark:text-[#003735] text-[9px] font-black uppercase tracking-wider py-1 rounded-xl shadow-xs text-center">
                   🌐 Web App Tier ($15)
                 </div>
               )
             ) : (
               <button
                 onClick={() => setShowPaymentPortal(true)}
-                className={`w-full bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider rounded-xl text-center cursor-pointer transition ${sidebarCollapsed ? 'py-1' : 'py-1.5'}`}
+                className={`w-full bg-[#004b49] hover:bg-[#003735] text-white text-[9px] font-black uppercase tracking-wider rounded-xl text-center cursor-pointer transition ${sidebarCollapsed ? 'py-1' : 'py-1.5'}`}
               >
                 {sidebarCollapsed ? "🟢" : "🟢 Upgrade License"}
               </button>
@@ -1510,7 +1513,7 @@ export default function App() {
                     className="hidden md:flex items-center gap-1.5 text-xs text-[#86868b] dark:text-[#8e8e93] font-semibold hover:text-[#1d1d1f] dark:hover:text-white transition duration-150 select-none cursor-pointer bg-transparent border-0 p-0 mr-1.5 focus:outline-none"
                     title={sidebarCollapsed ? "Expand Sidebar Layout" : "Collapse Sidebar Layout"}
                   >
-                    <Compass className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <Compass className="w-4 h-4 text-[#004b49] dark:text-[#95d1ce]" />
                     <span>{activeProjName}</span>
                     <span>//</span>
                   </button>
@@ -1522,9 +1525,13 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Portion: Quick SRS pill, Helper Bot pill, Project Dropdown selector & license info */}
-            <div className="flex items-center gap-2.5 shrink-0">
+            {/* Right Portion: Language Selector, Quick SRS pill, Helper Bot pill, Project Dropdown selector & license info */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Language Changing Option */}
+              <LanguageSelector variant="header" />
+
               <button
+                type="button"
                 onClick={() => setHelperBotOpen(!helperBotOpen)}
                 className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-xl border transition cursor-pointer ${
                   helperBotOpen
@@ -1538,13 +1545,14 @@ export default function App() {
               </button>
 
               <button
+                type="button"
                 onClick={() => setActiveTab('srs')}
                 className={`hidden sm:inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-xl border transition cursor-pointer ${
                   activeTab === 'srs'
                     ? 'bg-[#004b49] text-white border-[#004b49]'
                     : 'bg-[#f5f5f7] dark:bg-[#252526] text-[#1d1d1f] dark:text-white border-[#e8e8ed] dark:border-[#2d2d2f] hover:border-[#004b49]'
                 }`}
-                title="View IEEE 830 Software Requirements Specification"
+                title="View Requirements Specification (SRS)"
               >
                 <BookOpen className="w-3.5 h-3.5" />
                 <span>10. SRS Specs</span>
@@ -1568,7 +1576,7 @@ export default function App() {
               {licenseTier === 'enterprise' && (
                 <button
                   onClick={() => setShowInstallerPopout(true)}
-                  className="bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/45 border border-amber-200/50 text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-xl cursor-pointer hover:scale-102 transition flex items-center gap-1.5 shrink-0"
+                  className="bg-[#f5f5f7] hover:bg-[#e8e8ed] dark:bg-[#252526] dark:hover:bg-[#2f2f31] border border-[#e8e8ed] dark:border-[#2d2d2f] text-[#1d1d1f] dark:text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-xl cursor-pointer hover:scale-102 transition flex items-center gap-1.5 shrink-0"
                   title="Offline Deployment Guide"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -1580,10 +1588,10 @@ export default function App() {
               {pinLockActive && (
                 <div 
                   onClick={() => setShowPinUnlockModal(true)}
-                  className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300 text-amber-700 dark:text-amber-400 font-bold text-[9px] px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer hover:bg-amber-100"
+                  className="bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-[#1d1d1f] dark:text-white font-bold text-[9px] px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer hover:bg-[#e8e8ed]"
                   title="Workspace is read-only. Click to unlock"
                 >
-                  <Lock className="w-3 h-3 shrink-0" />
+                  <Lock className="w-3 h-3 shrink-0 text-[#004b49] dark:text-[#95d1ce]" />
                   <span className="hidden xs:inline">RO-LOCK</span>
                 </div>
               )}
@@ -1644,7 +1652,7 @@ export default function App() {
                   setTheme(theme === 'light' ? 'dark' : 'light');
                   setMobileMenuOpen(false);
                 }}
-                className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold"
+                className="text-[10px] text-[#004b49] dark:text-[#95d1ce] font-bold"
               >
                 Toggle {theme === 'light' ? 'Dark' : 'Light'} Mode
               </button>
@@ -1657,15 +1665,15 @@ export default function App() {
           
           {/* Security Shield Lock active notification banner */}
           {pinLockActive && (
-            <div className="mb-4 p-3.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-2xl flex items-center gap-3 text-amber-800 dark:text-amber-400 text-xs shadow-sm animate-fade-in text-left">
-              <Lock className="w-5 h-5 text-amber-500 shrink-0" />
+            <div className="mb-4 p-3.5 bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] rounded-2xl flex items-center gap-3 text-[#1d1d1f] dark:text-white text-xs shadow-sm animate-fade-in text-left">
+              <Lock className="w-5 h-5 text-[#004b49] dark:text-[#95d1ce] shrink-0" />
               <div className="flex-1">
                 <span className="font-bold block">Security Shield Lock Active ({currentUser?.name || "Corporate Admin"})</span>
-                <span>All corporate workspace templates are currently read-only. Unlock using the sidebar shield control or tap the lock to edit structure layers.</span>
+                <span className="text-[#86868b] dark:text-[#8e8e93]">All corporate workspace templates are currently read-only. Unlock using the sidebar shield control or tap the lock to edit structure layers.</span>
               </div>
               <button
                 onClick={() => setShowPinUnlockModal(true)}
-                className="bg-amber-100 dark:bg-amber-900 border border-amber-200 hover:bg-amber-200 text-amber-950 dark:text-amber-200 text-[11px] font-bold px-3 py-1.5 rounded-xl cursor-pointer transition select-none"
+                className="bg-[#004b49] text-white hover:bg-[#003735] text-[11px] font-bold px-3 py-1.5 rounded-xl cursor-pointer transition select-none"
               >
                 Verify PIN to Unlock
               </button>
@@ -1807,14 +1815,14 @@ export default function App() {
       {/* PERSISTENT FLOATING BOTTOM DOCK (FR-NAV-02) */}
       <div
         id="persistent-bottom-dock"
-        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white/90 dark:bg-[#1d1d1f]/95 backdrop-blur-xl border border-[#e8e8ed] dark:border-[#2d2d2f] shadow-xl select-none"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white/95 dark:bg-[#1d1d1f]/95 backdrop-blur-xl border border-[#e8e8ed] dark:border-[#2d2d2f] shadow-xl select-none"
       >
         <button
           onClick={() => setDockMenuOpen(!dockMenuOpen)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
             dockMenuOpen
-              ? 'bg-[#004b49] text-white'
-              : 'bg-[#1d1d1f] dark:bg-white text-white dark:text-[#1d1d1f] hover:opacity-90'
+              ? 'bg-[#004b49] text-white shadow-xs'
+              : 'bg-[#f5f5f7] dark:bg-[#252526] text-[#1d1d1f] dark:text-white border border-[#e8e8ed] dark:border-[#2d2d2f] hover:bg-[#e8e8ed] dark:hover:bg-[#2f2f31]'
           }`}
           title="Open Workspace Navigation Sheet Modal"
         >
@@ -1843,7 +1851,7 @@ export default function App() {
               }}
               className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
                 isActive
-                  ? 'bg-[#004b49]/10 dark:bg-[#76b0b1]/20 text-[#004b49] dark:text-[#76b0b1] font-bold'
+                  ? 'bg-[#004b49]/10 dark:bg-[#95d1ce]/20 text-[#004b49] dark:text-[#95d1ce] font-bold'
                   : 'text-[#86868b] dark:text-[#8e8e93] hover:text-[#1d1d1f] dark:hover:text-white hover:bg-[#f5f5f7] dark:hover:bg-[#252526]'
               }`}
               title={dockItem.label}
@@ -1861,7 +1869,7 @@ export default function App() {
           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
             helperBotOpen
               ? 'bg-[#004b49] text-white'
-              : 'text-[#004b49] dark:text-[#95d1ce] hover:bg-[#004b49]/10 dark:hover:bg-[#76b0b1]/20'
+              : 'text-[#004b49] dark:text-[#95d1ce] hover:bg-[#004b49]/10 dark:hover:bg-[#95d1ce]/20'
           }`}
           title="Open Grounded mOS Helper Bot"
         >
@@ -1967,7 +1975,7 @@ export default function App() {
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                     setDockMenuOpen(false);
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-[#1d1d1f] dark:bg-white text-white dark:text-[#1d1d1f] font-semibold flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-[#f5f5f7] dark:bg-[#252526] text-[#1d1d1f] dark:text-white border border-[#e8e8ed] dark:border-[#2d2d2f] hover:bg-[#e8e8ed] dark:hover:bg-[#2f2f31] font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
                   <span>Return to Top</span>
@@ -2031,8 +2039,8 @@ export default function App() {
       {showPinUnlockModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] rounded-2xl p-6 w-full max-w-sm shadow-xl space-y-4 text-left">
-            <div className="flex items-center gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2.5">
-              <Lock className="w-5 h-5 text-indigo-600" />
+            <div className="flex items-center gap-2 border-b border-[#e8e8ed] dark:border-[#2d2d2f] pb-2.5">
+              <Lock className="w-5 h-5 text-[#004b49] dark:text-[#95d1ce]" />
               <h3 className="font-bold text-sm text-[#1d1d1f] dark:text-[#f5f5f7]">Unlock Workspace</h3>
             </div>
             
@@ -2048,7 +2056,7 @@ export default function App() {
                 value={pinUnlockCode}
                 onChange={(e) => setPinUnlockCode(e.target.value.replace(/\D/g, ''))}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleVerifyUnlockPin(); }}
-                className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-center text-xl font-mono tracking-widest rounded-xl py-3 outline-none focus:border-indigo-500 transition"
+                className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-center text-xl font-mono tracking-widest rounded-xl py-3 outline-none focus:border-[#004b49] transition"
                 autoFocus
               />
 

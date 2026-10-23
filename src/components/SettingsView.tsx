@@ -30,6 +30,7 @@ import {
 import { Playbook, TeamMember, ScorecardMetric, SprintPlan, ClarityCompass, ValueEngineNode, UserRole, INITIAL_PLAYBOOKS, INITIAL_TEAM_MEMBERS, INITIAL_SCORECARD, INITIAL_SPRINT_PLAN, INITIAL_COMPASS } from '../types';
 import OnboardingWizard from './OnboardingWizard';
 import SrsDocumentView from './SrsDocumentView';
+import LanguageSelector from './LanguageSelector';
 
 // Fast & Safe compact MD5 implementation for Gravatar email extraction
 const computeMD5 = (str: string): string => {
@@ -1283,6 +1284,11 @@ export default function SettingsView({
                         </div>
                       </div>
                     )}
+                  </div>
+
+                  {/* Language Changing Option Card */}
+                  <div className="bg-[#fbfbfd] dark:bg-[#252526] border border-[#e8e8ed] dark:border-neutral-800 rounded-xl p-4 shadow-sm">
+                    <LanguageSelector variant="expanded" />
                   </div>
 
                   {/* Metadata cards layout */}

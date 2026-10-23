@@ -10,7 +10,12 @@ import {
   Award,
   CheckCircle2,
   AlertCircle,
-  FileText
+  FileText,
+  Filter,
+  Search,
+  X,
+  RotateCcw,
+  SlidersHorizontal
 } from 'lucide-react';
 import { 
   PieChart, 
@@ -26,6 +31,7 @@ import {
   CartesianGrid
 } from 'recharts';
 import { ScorecardMetric, TeamMember, MetricCategory, SprintPlan, Playbook } from '../types';
+import { useLanguage } from '../LanguageContext';
 
 // --- HELPER STRATEGIC TARGET MATCHERS & CALCULATORS ---
 
@@ -148,7 +154,11 @@ export default function ScorecardView({
   onUpdateScorecard,
   sprintPlan,
 }: ScorecardViewProps) {
+  const { t } = useLanguage();
   const [activeCategory, setActiveCategory] = useState<MetricCategory | 'all'>('all');
+  const [activeStatus, setActiveStatus] = useState<'all' | 'GREEN' | 'YELLOW' | 'RED'>('all');
+  const [activeOwner, setActiveOwner] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedMetricId, setSelectedMetricId] = useState<string | null>(scorecard[0]?.id || null);
   
   // Set default selected if state is null but scorecard has elements
@@ -169,7 +179,27 @@ export default function ScorecardView({
   // Chart configuration state
   const [activePieTab, setActivePieTab] = useState<'health' | 'category'>('health');
 
-  const filteredMetrics = scorecard.filter(m => activeCategory === 'all' || m.category === activeCategory);
+  // Filter metrics based on category, status, owner, and search query
+  const filteredMetrics = scorecard.filter(m => {
+    if (activeCategory !== 'all' && m.category !== activeCategory) return false;
+    if (activeStatus !== 'all' && m.status !== activeStatus) return false;
+    if (activeOwner !== 'all' && m.ownerId !== activeOwner) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const ownerName = teamMembers.find(tm => tm.id === m.ownerId)?.name.toLowerCase() || '';
+      if (!m.name.toLowerCase().includes(q) && !ownerName.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const isAnyFilterActive = activeCategory !== 'all' || activeStatus !== 'all' || activeOwner !== 'all' || searchQuery.trim() !== '';
+
+  const resetAllFilters = () => {
+    setActiveCategory('all');
+    setActiveStatus('all');
+    setActiveOwner('all');
+    setSearchQuery('');
+  };
 
   const handleUpdateMetricField = (metricId: string, field: keyof ScorecardMetric, value: any) => {
     const updated = scorecard.map(m => {
@@ -275,10 +305,10 @@ export default function ScorecardView({
   };
 
   const categoryColors: Record<string, string> = {
-    evergreen: '#047857', // Forest deep sage
-    northstar: '#b45309', // Burnished Gold
-    marketing: '#1d1d1f', // Luxury modern charcoal
-    sales: '#4338ca' // Royal indigo
+    evergreen: '#004b49', // Accent
+    northstar: '#004b49', // Accent
+    marketing: '#1d1d1f', // Primary
+    sales: '#86868b' // Secondary
   };
 
   const categoryPieData = Object.entries(categoryCounts).map(([cat, count]) => ({
@@ -297,79 +327,157 @@ export default function ScorecardView({
   return (
     <div className="space-y-8 animate-fade-in font-sans pb-12">
       
-      {/* Intro Panel - Apple Header layout */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white border border-[#e8e8ed] p-6 rounded-2xl shadow-sm">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold text-[#1d1d1f]">
-            Company scorecard matrix
-          </h2>
-          <p className="text-[#86868b] text-xs max-w-xl">
-            "Track metrics weekly, mirror your engines, and enter entries manually. Doing so builds absolute team ownership over strategic numbers, rather than simple passive reporting."
-          </p>
-        </div>
-
-        {/* Categories Tab buttons */}
-        <div className="flex flex-wrap gap-1 bg-[#f5f5f7] p-1 border border-[#e8e8ed] rounded-full">
-          {(['all', 'evergreen', 'northstar', 'marketing', 'sales'] as const).map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-4 py-1.5 text-[10px] uppercase font-semibold tracking-wider rounded-full transition cursor-pointer ${
-                activeCategory === cat
-                  ? 'bg-[#1d1d1f] text-white shadow-xs'
-                  : 'text-[#86868b] hover:text-[#1d1d1f]'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
+      {/* Intro Panel - Simple Header layout */}
+      <div className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] p-6 rounded-2xl shadow-sm space-y-1">
+        <h2 className="text-xl font-bold text-[#1d1d1f] dark:text-white">
+          {t('header.scorecard.title', 'Weekly Numbers (Scorecard)')}
+        </h2>
+        <p className="text-[#86868b] dark:text-[#8e8e93] text-xs max-w-2xl leading-relaxed">
+          {t('header.scorecard.sub', 'Track your most important numbers each week to stay on target. Update numbers every Monday morning.')}
+        </p>
       </div>
 
-      {/* Rules Banner - Simple clean text card */}
-      <div className="bg-white border border-[#e8e8ed] rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <span className="text-[10px] font-semibold text-[#1d1d1f] tracking-wider uppercase font-mono">
-            CORE PROTOCOL: MANUALLY UPDATED WEEKLY KPI
-          </span>
-          <p className="font-semibold text-sm text-[#1d1d1f]">
-            Update manual weekly inputs every Monday morning before team sprints.
-          </p>
+      {/* Filter Option Bar (Replaces confusing toggle buttons with direct filtering) */}
+      <div className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] p-4 sm:p-5 rounded-2xl shadow-sm space-y-3.5">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 border-b border-[#f5f5f7] dark:border-[#2d2d2f]">
+          <div className="flex items-center gap-2 text-xs font-bold text-[#1d1d1f] dark:text-white uppercase tracking-wider">
+            <Filter className="w-4 h-4 text-[#004b49] dark:text-[#95d1ce]" />
+            <span>{t('scorecard.filter_title', 'Filter Numbers')}</span>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-[#86868b] dark:text-[#8e8e93] text-[11px] font-mono">
+              {t('scorecard.showing', 'Showing')} <strong className="text-[#1d1d1f] dark:text-white">{filteredMetrics.length}</strong> {t('scorecard.of', 'of')} {scorecard.length} {t('scorecard.metrics', 'numbers')}
+            </span>
+            {isAnyFilterActive && (
+              <button
+                type="button"
+                onClick={resetAllFilters}
+                className="text-[11px] font-bold text-[#004b49] dark:text-[#95d1ce] hover:underline flex items-center gap-1 cursor-pointer transition"
+              >
+                <RotateCcw className="w-3 h-3" />
+                {t('scorecard.reset_filter', 'Reset Filter')}
+              </button>
+            )}
+          </div>
         </div>
-        
-        <div className="flex items-center gap-3.5 text-xs">
-          <span className="text-[#86868b] font-mono">Status cycling guide:</span>
-          <div className="flex gap-2 text-[10px] font-mono">
-            <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-100">🟢 ON TRACK</span>
-            <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-100 font-bold">🟡 BEHIND W/ PLAN</span>
-            <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-800 border border-red-100">🔴 CRITICAL</span>
+
+        {/* Filter Controls Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* 1. Search Box */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-[#86868b] absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('scorecard.search_placeholder', 'Search by number or owner...')}
+              className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs text-[#1d1d1f] dark:text-white rounded-xl pl-9 pr-7 py-2 outline-none focus:border-[#1d1d1f] dark:focus:border-neutral-400 transition"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="text-[#86868b] hover:text-[#1d1d1f] dark:hover:text-white absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* 2. Category Filter Dropdown */}
+          <div>
+            <select
+              value={activeCategory}
+              onChange={(e) => setActiveCategory(e.target.value as any)}
+              className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl px-3 py-2 outline-none cursor-pointer focus:border-[#1d1d1f] dark:focus:border-neutral-400 transition"
+              title="Filter by number category"
+            >
+              <option value="all">{t('scorecard.category_all', 'All Categories')}</option>
+              <option value="evergreen">{t('scorecard.category_evergreen', '🌲 Daily Operations')}</option>
+              <option value="northstar">{t('scorecard.category_northstar', '⭐ Main Company Goals')}</option>
+              <option value="marketing">{t('scorecard.category_marketing', '📣 Marketing (Leads)')}</option>
+              <option value="sales">{t('scorecard.category_sales', '💼 Sales (Deals)')}</option>
+            </select>
+          </div>
+
+          {/* 3. Health Status Filter Dropdown */}
+          <div>
+            <select
+              value={activeStatus}
+              onChange={(e) => setActiveStatus(e.target.value as any)}
+              className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl px-3 py-2 outline-none cursor-pointer focus:border-[#1d1d1f] dark:focus:border-neutral-400 transition"
+              title="Filter by health status"
+            >
+              <option value="all">{t('scorecard.status_all', 'All Health Statuses')}</option>
+              <option value="GREEN">{t('scorecard.status_green', '🟢 On Track (Good)')}</option>
+              <option value="YELLOW">{t('scorecard.status_yellow', '🟡 At Risk (Need Plan)')}</option>
+              <option value="RED">{t('scorecard.status_red', '🔴 Behind (Take Action)')}</option>
+            </select>
+          </div>
+
+          {/* 4. Owner Filter Dropdown */}
+          <div>
+            <select
+              value={activeOwner}
+              onChange={(e) => setActiveOwner(e.target.value)}
+              className="w-full bg-[#f5f5f7] dark:bg-[#252526] border border-[#e8e8ed] dark:border-[#2d2d2f] text-xs font-semibold text-[#1d1d1f] dark:text-white rounded-xl px-3 py-2 outline-none cursor-pointer focus:border-[#1d1d1f] dark:focus:border-neutral-400 transition"
+              title="Filter by owner"
+            >
+              <option value="all">All Responsible Owners</option>
+              {teamMembers.map(tm => (
+                <option key={tm.id} value={tm.id}>{tm.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Quick reminder rule note */}
+        <div className="pt-2 border-t border-[#f5f5f7] dark:border-[#2d2d2f] flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-[#86868b] dark:text-[#8e8e93] gap-2">
+          <span>{t('scorecard.rule_note', 'Simple Rule: Enter your actual numbers every Monday morning.')}</span>
+          <div className="flex items-center gap-2 text-[10.5px]">
+            <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200/60">🟢 {t('scorecard.status_green', 'Good')}</span>
+            <span className="px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold border border-amber-200/60">🟡 {t('scorecard.status_yellow', 'At Risk')}</span>
+            <span className="px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 font-bold border border-rose-200/60">🔴 {t('scorecard.status_red', 'Behind')}</span>
           </div>
         </div>
       </div>
 
       {/* Manual Grid Spreadsheet */}
-      <div className="bg-white border border-[#e8e8ed] rounded-2xl shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-[#1d1d1f] border border-[#e8e8ed] dark:border-[#2d2d2f] rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-[#fbfbfd] border-b border-[#e8e8ed] text-[#86868b] font-semibold uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-6">Official KPI / Metric</th>
-                <th className="py-3 px-2 text-center">Unit</th>
-                <th className="py-3 px-2 text-center w-24">Week 1</th>
-                <th className="py-3 px-2 text-center w-24">Week 2</th>
-                <th className="py-3 px-2 text-center w-24">Week 3</th>
-                <th className="py-3 px-2 text-center w-24">Week 4</th>
-                <th className="py-3 px-2 text-center w-24">Target</th>
-                <th className="py-3 px-3 text-center">Status (Manual Click)</th>
-                <th className="py-3 px-4 font-bold">SOP Owner</th>
-                <th className="py-3 px-4">Linked Playbook (SOP)</th>
-                <th className="py-3 px-4 text-center">Action</th>
+              <tr className="bg-[#fbfbfd] dark:bg-[#252526] border-b border-[#e8e8ed] dark:border-[#2d2d2f] text-[#86868b] dark:text-[#8e8e93] font-semibold uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-6">{t('scorecard.col_name', 'Number to Track (KPI)')}</th>
+                <th className="py-3 px-2 text-center">{t('scorecard.col_unit', 'Unit')}</th>
+                <th className="py-3 px-2 text-center w-24">{t('scorecard.col_w1', 'Week 1')}</th>
+                <th className="py-3 px-2 text-center w-24">{t('scorecard.col_w2', 'Week 2')}</th>
+                <th className="py-3 px-2 text-center w-24">{t('scorecard.col_w3', 'Week 3')}</th>
+                <th className="py-3 px-2 text-center w-24">{t('scorecard.col_w4', 'Week 4')}</th>
+                <th className="py-3 px-2 text-center w-24">{t('scorecard.col_target', 'Goal Target')}</th>
+                <th className="py-3 px-3 text-center">{t('scorecard.col_status', 'Health (Click to change)')}</th>
+                <th className="py-3 px-4 font-bold">{t('scorecard.col_owner', 'Owner')}</th>
+                <th className="py-3 px-4">{t('scorecard.col_sop', 'Linked Guide (SOP)')}</th>
+                <th className="py-3 px-4 text-center">{t('scorecard.col_action', 'Action')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#f5f5f7] text-xs text-[#1d1d1f]">
+            <tbody className="divide-y divide-[#f5f5f7] dark:divide-[#2d2d2f] text-xs text-[#1d1d1f] dark:text-white">
               {filteredMetrics.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-8 text-center text-[#86868b]">No metrics active in this category.</td>
+                  <td colSpan={11} className="py-10 text-center text-[#86868b] dark:text-[#8e8e93] space-y-2">
+                    <p className="font-semibold text-xs">No numbers match the selected filter.</p>
+                    {isAnyFilterActive && (
+                      <button
+                        type="button"
+                        onClick={resetAllFilters}
+                        className="text-xs font-bold text-[#004b49] dark:text-[#95d1ce] hover:underline cursor-pointer"
+                      >
+                        {t('scorecard.reset_filter', 'Reset Filter')}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ) : (
                 filteredMetrics.map(m => {
@@ -689,7 +797,7 @@ export default function ScorecardView({
         <div className="lg:col-span-4 bg-white border border-[#e8e8ed] rounded-2xl p-6 shadow-sm space-y-4">
           <div className="flex justify-between items-center border-b border-[#f5f5f7] pb-3">
             <h3 className="font-semibold text-[#1d1d1f] text-sm flex items-center gap-1.5">
-              <PieIcon className="w-4 h-4 text-purple-600" />
+              <PieIcon className="w-4 h-4 text-[#004b49] dark:text-[#95d1ce]" />
               Metrics Breakdown Pie
             </h3>
             <div className="flex rounded-full bg-neutral-100 p-0.5 text-[9px] font-bold">
@@ -893,14 +1001,14 @@ export default function ScorecardView({
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-[#f5f5f7] pb-4">
           <div className="space-y-1">
             <h3 className="font-extrabold text-[#1d1d1f] text-base flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-indigo-600" />
+              <CheckCircle2 className="w-5 h-5 text-[#004b49] dark:text-[#95d1ce]" />
               Playbook Completion Scorecard
             </h3>
             <p className="text-xs text-[#86868b]">
               Verify process integrity: Direct correlation showing how completed SOPs (playbooks) drive on-target metric success.
             </p>
           </div>
-          <span className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold px-3 py-1.5 rounded-full border border-indigo-150 uppercase tracking-wider font-mono">
+          <span className="text-[10px] bg-[#004b49]/10 text-[#004b49] dark:text-[#95d1ce] font-extrabold px-3 py-1.5 rounded-full border border-[#004b49]/20 uppercase tracking-wider font-mono">
             SOP Metric Impact Core
           </span>
         </div>
@@ -971,13 +1079,13 @@ export default function ScorecardView({
                 </div>
 
                 {/* Stat 3: Metric Correlation Index */}
-                <div className="bg-indigo-50/40 border border-indigo-150/60 rounded-xl p-4 space-y-1">
-                  <span className="text-[10px] text-indigo-800 font-bold uppercase tracking-wider block">Operational Synergy Proof</span>
+                <div className="bg-[#004b49]/10 border border-[#004b49]/20 rounded-xl p-4 space-y-1">
+                  <span className="text-[10px] text-[#004b49] dark:text-[#95d1ce] font-bold uppercase tracking-wider block">Operational Synergy Proof</span>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-indigo-700">{correlationPercent}%</span>
-                    <span className="text-xs text-indigo-800 font-bold">Accuracy Proof</span>
+                    <span className="text-2xl font-black text-[#004b49] dark:text-[#95d1ce]">{correlationPercent}%</span>
+                    <span className="text-xs text-[#004b49] dark:text-[#95d1ce] font-bold">Accuracy Proof</span>
                   </div>
-                  <p className="text-[10.5px] text-indigo-900/80 leading-tight block font-sans">
+                  <p className="text-[10.5px] text-[#1d1d1f] dark:text-white leading-tight block font-sans">
                     {correlationPercent >= 70 
                       ? "High correlation proven. Keeping Playbooks up-to-date corresponds directly to healthy on-target KPIs."
                       : "Unfinished playbooks correlate directly to metrics falling below targets."
@@ -1013,20 +1121,20 @@ export default function ScorecardView({
                       
                       // Relation diagnosis
                       let diagLabel = "Optimal Alignment";
-                      let diagCol = "text-emerald-800 bg-emerald-50/80 border-emerald-200";
+                      let diagCol = "text-[#004b49] bg-[#004b49]/10 border-[#004b49]/30";
                       let diagDesc = "Active SOP steps are completed. Direct contribution to healthy on-target KPI performance.";
 
                       if (m.status !== 'GREEN' && normalizedRate < 70) {
                         diagLabel = "Execution Gap (Action Required)";
-                        diagCol = "text-rose-800 bg-rose-50/80 border-rose-250 animate-pulse";
+                        diagCol = "text-[#1d1d1f] bg-[#f5f5f7] border-[#e8e8ed]";
                         diagDesc = "KPI is behind target and checklist steps are incomplete. Finish the playbook tasks to restore metric health.";
                       } else if (m.status !== 'GREEN' && normalizedRate >= 70) {
                         diagLabel = "Strategy Constraint";
-                        diagCol = "text-amber-800 bg-amber-50/60 border-amber-200";
+                        diagCol = "text-[#1d1d1f] bg-[#f5f5f7] border-[#e8e8ed]";
                         diagDesc = "Checklist is fully completed, yet the KPI is failing. The process layout needs strategic optimization.";
                       } else if (m.status === 'GREEN' && normalizedRate < 70) {
                         diagLabel = "Hero Vulnerability (Warning)";
-                        diagCol = "text-blue-800 bg-blue-50/80 border-blue-200";
+                        diagCol = "text-[#004b49] bg-[#004b49]/5 border-[#004b49]/20";
                         diagDesc = "KPI is green by raw effort, but low playbook compliance introduces high bottleneck risk during team scaling.";
                       }
 
@@ -1045,10 +1153,8 @@ export default function ScorecardView({
                             </div>
                             <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full ${
                               m.status === 'GREEN' 
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                                : m.status === 'YELLOW'
-                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                  : 'bg-rose-100 text-rose-800 border border-rose-250'
+                                ? 'bg-[#004b49] text-white border border-[#004b49]' 
+                                : 'bg-[#f5f5f7] text-[#1d1d1f] border border-[#e8e8ed]'
                             }`}>
                               {m.status}
                             </span>
@@ -1063,7 +1169,7 @@ export default function ScorecardView({
                             <div className="w-full h-2 bg-neutral-100 rounded-full overflow-hidden border border-[#e8e8ed]">
                               <div 
                                 className={`h-full rounded-full transition-all duration-500 ${
-                                  normalizedRate >= 75 ? 'bg-emerald-500' : normalizedRate >= 50 ? 'bg-amber-500' : 'bg-rose-500'
+                                  normalizedRate >= 75 ? 'bg-[#004b49]' : 'bg-[#86868b]'
                                 }`}
                                 style={{ width: `${normalizedRate}%` }}
                               />
@@ -1073,7 +1179,7 @@ export default function ScorecardView({
                           {/* Diagnosis badge */}
                           <div className={`p-3 rounded-lg border text-[11px] font-semibold leading-relaxed ${diagCol}`}>
                             <div className="font-black uppercase tracking-wide text-[10px] mb-0.5 flex items-center gap-1">
-                              <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                              <Sparkles className="w-3.5 h-3.5 text-[#004b49] dark:text-[#95d1ce]" />
                               {diagLabel}
                             </div>
                             {diagDesc}
