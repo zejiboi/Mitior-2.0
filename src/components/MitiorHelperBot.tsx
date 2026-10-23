@@ -227,7 +227,11 @@ export default function MitiorHelperBot({
         }
       } catch {}
 
-      // 2. Sync with backend persistent user memory
+      // 2. Sync with backend persistent user memory only when authenticated
+      const activeToken = localStorage.getItem('sOS_session_token');
+      if (!activeToken || memoryKey === 'public-login-gate') {
+        return;
+      }
       try {
         const query = `?userId=${encodeURIComponent(memoryKey)}&userName=${encodeURIComponent(context.userName || 'Administrator')}`;
         const res = await fetch(`/api/assistant/memory${query}`, {
@@ -374,6 +378,10 @@ export default function MitiorHelperBot({
     setMemory(emptyMemory);
     localStorage.setItem(localStorageKey, JSON.stringify(emptyMemory));
 
+    const activeToken = localStorage.getItem('sOS_session_token');
+    if (!activeToken || memoryKey === 'public-login-gate') {
+      return;
+    }
     try {
       await fetch(`/api/assistant/memory?userId=${encodeURIComponent(memoryKey)}`, {
         method: 'DELETE',

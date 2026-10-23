@@ -497,3 +497,291 @@ describe('3. Sync Codes with Workspace Hydration, Cloud Backups, Salted PIN Lock
   });
 });
 
+describe('4. Red/Blue/Purple Team Security Readiness Validation Suite', () => {
+  let standardUserToken = '';
+  let standardUserId = '';
+  let adminToken = '';
+  let adminUserId = '';
+
+  test('SEC-RT-06 & SEC-RT-07: HTTP Security Headers, CORS Origin Guard, and Memory-Hard Scrypt KDF', async () => {
+    const pwHash = hashPassword('PurpleTeamValidation!2026');
+    assert.ok(pwHash.startsWith('scrypt:'), 'Password hash must use NIST-compliant memory-hard scrypt KDF');
+    assert.equal(verifyPassword('PurpleTeamValidation!2026', pwHash), true);
+
+    const pinDigest = hashPin('9482');
+    assert.ok(pinDigest.startsWith('scrypt:'), 'PIN hash must use memory-hard scrypt KDF');
+    assert.equal(verifyPin('9482', pinDigest), true);
+
+    const res = await fetch(`${baseUrl}/api/health`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('x-powered-by'), null, 'X-Powered-By header must be suppressed');
+    assert.ok(res.headers.get('content-security-policy')?.includes("default-src 'self'"), 'CSP header must be enforced');
+    assert.ok(res.headers.get('strict-transport-security')?.includes('max-age=31536000'), 'HSTS header must be enforced');
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+    assert.ok(res.headers.get('cache-control')?.includes('no-store'), 'API responses must enforce Cache-Control: no-store');
+
+    // Untrusted cross-origin request must be blocked with 403
+    const corsRes = await fetch(`${baseUrl}/api/health`, {
+      headers: { Origin: 'https://malicious-attacker.example.com' }
+    });
+    assert.equal(corsRes.status, 403, 'Untrusted cross-origin API request must be rejected with 403');
+  });
+
+  test('SEC-RT-03: Broken Function Level Authorization (BFLA) blocked on /api/admin/overview & /api/admin/audit-logs', async () => {
+    // Register a standard non-admin tenant
+    const signupRes = await fetch(`${baseUrl}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Standard Operator',
+        email: 'operator.tenant@example.com',
+        password: 'OperatorPass123!'
+      })
+    });
+    assert.equal(signupRes.status, 200);
+    const signupData: any = await signupRes.json();
+    standardUserToken = signupData.sessionToken;
+    standardUserId = signupData.user.id;
+
+    // Non-admin user attempting to access /api/admin/overview must receive 403 Forbidden
+    const nonAdminOverviewRes = await fetch(`${baseUrl}/api/admin/overview`, {
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(nonAdminOverviewRes.status, 403, 'Standard tenant must be denied access to /api/admin/overview');
+
+    const nonAdminAuditRes = await fetch(`${baseUrl}/api/admin/audit-logs`, {
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(nonAdminAuditRes.status, 403, 'Standard tenant must be denied access to /api/admin/audit-logs');
+
+    // Login as corporate admin and confirm 200 OK
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'ryan@mitior.co', password: 'password123' })
+    });
+    assert.equal(adminLoginRes.status, 200);
+    const adminLoginData: any = await adminLoginRes.json();
+    adminToken = adminLoginData.sessionToken;
+    adminUserId = adminLoginData.user.id;
+
+    const adminAuditRes = await fetch(`${baseUrl}/api/admin/audit-logs`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(adminAuditRes.status, 200);
+    const auditBody: any = await adminAuditRes.json();
+    assert.equal(auditBody.success, true);
+    assert.ok(Array.isArray(auditBody.auditLogs));
+    assert.ok(auditBody.auditLogs.some((e: any) => e.eventType === 'BFLA_ADMIN_ACCESS_DENIED'));
+  });
+
+  test('SEC-RT-02: Assistant Memory BOLA & Unauthenticated Tenant Targeting Blocked', async () => {
+    // 1. Unauthenticated GET /api/assistant/memory must be rejected with 401
+    const unauthGetRes = await fetch(`${baseUrl}/api/assistant/memory?userId=${adminUserId}`);
+    assert.equal(unauthGetRes.status, 401);
+
+    // 2. Unauthenticated DELETE /api/assistant/memory must be rejected with 401
+    const unauthDelRes = await fetch(`${baseUrl}/api/assistant/memory?userId=${adminUserId}`, {
+      method: 'DELETE'
+    });
+    assert.equal(unauthDelRes.status, 401);
+
+    // 3. Unauthenticated POST /api/assistant/chat targeting a registered tenant ID must be rejected with 401
+    const unauthChatTenantRes = await fetch(`${baseUrl}/api/assistant/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Show my notes',
+        context: { userId: adminUserId, userRole: 'ceo' }
+      })
+    });
+    assert.equal(unauthChatTenantRes.status, 401);
+
+    // 4. Authenticated standard user attempting cross-tenant GET/POST/DELETE against adminUserId must receive 403
+    const crossGetRes = await fetch(`${baseUrl}/api/assistant/memory?userId=${adminUserId}`, {
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(crossGetRes.status, 403);
+
+    const crossChatRes = await fetch(`${baseUrl}/api/assistant/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${standardUserToken}`
+      },
+      body: JSON.stringify({
+        message: 'Clear notes',
+        context: { userId: adminUserId, userRole: 'ceo' }
+      })
+    });
+    assert.equal(crossChatRes.status, 403);
+
+    const crossDelRes = await fetch(`${baseUrl}/api/assistant/memory?userId=${adminUserId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(crossDelRes.status, 403);
+  });
+
+  test('SEC-RT-01: Production Recovery Code Non-Disclosure & 5-Attempt Brute-Force Lockout', async () => {
+    // Simulate strict production mode where recoveryCode must not be leaked in HTTP response
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevTestMode = process.env.MITIOR_TEST_MODE;
+    process.env.NODE_ENV = 'production';
+    process.env.MITIOR_TEST_MODE = 'false';
+
+    try {
+      const prodCodeRes = await fetch(`${baseUrl}/api/auth/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'operator.tenant@example.com' })
+      });
+      assert.equal(prodCodeRes.status, 200);
+      const prodCodeData: any = await prodCodeRes.json();
+      assert.equal(prodCodeData.success, true);
+      assert.equal(prodCodeData.recoveryCode, undefined, 'Recovery code must never be returned in strict production mode');
+      assert.equal(prodCodeData.deliveryChannel, 'out-of-band');
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      process.env.MITIOR_TEST_MODE = prevTestMode;
+    }
+
+    // Verify wrong recovery code is rejected with 401 and repeated attempts trigger 429 rate-limit/lockout
+    const firstBadResetRes = await fetch(`${baseUrl}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'operator.tenant@example.com',
+        password: 'NewPassword999!',
+        recoveryCode: '000000'
+      })
+    });
+    assert.equal(firstBadResetRes.status, 401);
+
+    let lastResetStatus = 0;
+    for (let i = 0; i < 4; i++) {
+      const badResetRes = await fetch(`${baseUrl}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'operator.tenant@example.com',
+          password: 'NewPassword999!',
+          recoveryCode: '000000'
+        })
+      });
+      lastResetStatus = badResetRes.status;
+    }
+    assert.equal(lastResetStatus, 429, 'Repeated failed password reset requests must trigger 429 rate-limit/lockout');
+  });
+
+  test('SEC-RT-04: Payment Negative/Zero Amount Rejection & Webhook Signature Verification', async () => {
+    // Negative card payment amount must be rejected with 400
+    const negCardRes = await fetch(`${baseUrl}/api/checkout/card-pay`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${standardUserToken}`
+      },
+      body: JSON.stringify({
+        blockCard: '4111 2222 3333 4444',
+        amount: -500,
+        holderName: 'Standard Operator',
+        planName: 'Enterprise Local App'
+      })
+    });
+    assert.equal(negCardRes.status, 400);
+
+    // Zero M-Pesa payment amount must be rejected with 400
+    const zeroMpesaRes = await fetch(`${baseUrl}/api/checkout/mpesa-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${standardUserToken}`
+      },
+      body: JSON.stringify({
+        phone: '0712345678',
+        amount: 0,
+        planName: 'Enterprise Local App'
+      })
+    });
+    assert.equal(zeroMpesaRes.status, 400);
+
+    // Unauthenticated / invalid secret webhook callback must be rejected with 401
+    const badWebhookRes = await fetch(`${baseUrl}/api/checkout/mpesa-callback?secret=wrong-secret`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Body: { stkCallback: { CheckoutRequestID: 'ws_CO_TEST', ResultCode: 0 } } })
+    });
+    assert.equal(badWebhookRes.status, 401);
+  });
+
+  test('SEC-RT-05 & SEC-RT-08: Cross-Tenant PIN Status Isolation, PIN Lockout, Session Logout Revocation, and 0600 DB Permissions', async () => {
+    // Upgrade standard user via valid card payment so they have SaaS tier access
+    const upgradeRes = await fetch(`${baseUrl}/api/checkout/card-pay`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${standardUserToken}`
+      },
+      body: JSON.stringify({
+        blockCard: '4111222233334444',
+        amount: 29,
+        holderName: 'Standard Operator',
+        planName: 'Professional Web App'
+      })
+    });
+    assert.equal(upgradeRes.status, 200);
+
+    // Cross-tenant PIN status inspection must fail with 403
+    const crossPinStatusRes = await fetch(`${baseUrl}/api/security/pin/status/${adminUserId}`, {
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(crossPinStatusRes.status, 403);
+
+    // Set PIN for standardUserId and trigger 5 failed attempts -> 429 lockout
+    const setPinRes = await fetch(`${baseUrl}/api/security/pin/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${standardUserToken}`
+      },
+      body: JSON.stringify({ userId: standardUserId, pin: '5824' })
+    });
+    assert.equal(setPinRes.status, 200);
+
+    let lockedStatus = 0;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const failPinRes = await fetch(`${baseUrl}/api/security/pin/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${standardUserToken}`
+        },
+        body: JSON.stringify({ userId: standardUserId, pin: '0000' })
+      });
+      lockedStatus = failPinRes.status;
+    }
+    assert.equal(lockedStatus, 429, '5th consecutive wrong PIN attempt must trigger 429 brute-force lockout');
+
+    // Verify database file permissions are owner-only (0600)
+    const stat = fs.statSync(testDbPath);
+    const mode = stat.mode & 0o777;
+    assert.equal(mode, 0o600, 'Database file must enforce 0600 permissions');
+
+    // Explicit logout revokes sessionToken on server
+    const logoutRes = await fetch(`${baseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(logoutRes.status, 200);
+
+    const postLogoutMeRes = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${standardUserToken}` }
+    });
+    assert.equal(postLogoutMeRes.status, 401, 'Revoked session token must be rejected after logout');
+  });
+});
+
+

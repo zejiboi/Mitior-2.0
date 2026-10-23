@@ -42,8 +42,26 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
     }
   };
 
+  const computeOfflineVerifier = (accountEmail: string, rawPassword: string): string => {
+    const normalized = `${accountEmail.trim().toLowerCase()}::mitior-local-v2::${rawPassword}`;
+    let h1 = 0xdeadbeef ^ normalized.length;
+    let h2 = 0x41c6ce57 ^ normalized.length;
+    for (let i = 0; i < normalized.length; i++) {
+      const ch = normalized.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `v2:${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
+  };
+
   const saveAccounts = (accounts: any[]) => {
-    localStorage.setItem('sOS_accounts', JSON.stringify(accounts));
+    const sanitized = accounts.map((acc: any) => {
+      const { password: _discardPlaintext, ...rest } = acc;
+      return rest;
+    });
+    localStorage.setItem('sOS_accounts', JSON.stringify(sanitized));
   };
 
   const performAuthWithCredentials = async (targetEmail: string, targetPassword: string, forceAdmin = false) => {
@@ -79,7 +97,12 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
     // 2. FALLBACK TO BROWSER LOCAL SANDBOX IF OFFLINE OR DISCREPANT
     const accounts = getAccounts();
-    const match = accounts.find((a: any) => a.email.toLowerCase() === cleanEmail && a.password === targetPassword);
+    const expectedVerifier = computeOfflineVerifier(cleanEmail, targetPassword);
+    const match = accounts.find(
+      (a: any) =>
+        a.email.toLowerCase() === cleanEmail &&
+        (a.passwordDigest === expectedVerifier || a.password === targetPassword)
+    );
     if (match) {
       onLoginSuccess(
         { id: match.id, name: match.name, email: match.email, paidTicket: (match.paidTicket || 'free') as any },
@@ -90,12 +113,12 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
       if (cleanEmail === 'ryan@mitior.co' && targetPassword === 'password123') {
         const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: 'ryan@mitior.co', paidTicket: 'enterprise' as const };
         const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'ryan@mitior.co');
-        saveAccounts([ ...otherAccs, { ...defaultAcc, password: 'password123' } ]);
+        saveAccounts([ ...otherAccs, { ...defaultAcc, passwordDigest: computeOfflineVerifier('ryan@mitior.co', 'password123') } ]);
         onLoginSuccess(defaultAcc, false, forceAdmin || isAdminLogin);
       } else if (cleanEmail === 'zejithefundi@gmail.com' && targetPassword === 'password123') {
         const defaultAcc = { id: 'acc-zeji', name: 'Zeji the Fundi', email: 'zejithefundi@gmail.com', paidTicket: 'enterprise' as const };
         const otherAccs = accounts.filter((a: any) => a.email.toLowerCase() !== 'zejithefundi@gmail.com');
-        saveAccounts([ ...otherAccs, { ...defaultAcc, password: 'password123' } ]);
+        saveAccounts([ ...otherAccs, { ...defaultAcc, passwordDigest: computeOfflineVerifier('zejithefundi@gmail.com', 'password123') } ]);
         onLoginSuccess(defaultAcc, false, forceAdmin || isAdminLogin);
       } else {
         setErrorMsg(backendAuthError || 'Invalid email or password combination.');
@@ -147,11 +170,12 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
     }
 
     const newId = `acc-${Date.now()}`;
-    const newAcc = { id: newId, name, email: email.toLowerCase(), password };
+    const cleanSignupEmail = email.toLowerCase();
+    const newAcc = { id: newId, name, email: cleanSignupEmail, passwordDigest: computeOfflineVerifier(cleanSignupEmail, password) };
     const updatedAccounts = [...accounts, newAcc];
     saveAccounts(updatedAccounts);
 
-    onLoginSuccess({ id: newId, name: name, email: email.toLowerCase() }, true);
+    onLoginSuccess({ id: newId, name: name, email: cleanSignupEmail }, true);
   };
 
   const appendEmailDomain = (domain: string, isResetPhase = false) => {
@@ -276,16 +300,17 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
 
     if (cleanEmail === defaultAccEmail) {
       const filtered = accounts.filter((a: any) => a.email.toLowerCase() !== defaultAccEmail);
-      const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: defaultAccEmail, password: newPassword };
+      const defaultAcc = { id: 'acc-default', name: 'Ryan Deiss', email: defaultAccEmail, passwordDigest: computeOfflineVerifier(defaultAccEmail, newPassword) };
       saveAccounts([...filtered, defaultAcc]);
     } else if (cleanEmail === creatorAccEmail) {
       const filtered = accounts.filter((a: any) => a.email.toLowerCase() !== creatorAccEmail);
-      const defaultAcc = { id: 'acc-zeji', name: 'Zeji the Fundi', email: creatorAccEmail, password: newPassword };
+      const defaultAcc = { id: 'acc-zeji', name: 'Zeji the Fundi', email: creatorAccEmail, passwordDigest: computeOfflineVerifier(creatorAccEmail, newPassword) };
       saveAccounts([...filtered, defaultAcc]);
     } else {
       const matchIdx = accounts.findIndex((a: any) => a.email.toLowerCase() === cleanEmail);
       if (matchIdx !== -1) {
-        accounts[matchIdx].password = newPassword;
+        accounts[matchIdx].passwordDigest = computeOfflineVerifier(cleanEmail, newPassword);
+        delete accounts[matchIdx].password;
         saveAccounts(accounts);
       } else {
         setErrorMsg('Security lookup mismatch: Account not discovered locally.');
@@ -732,7 +757,7 @@ export default function LoginAuthView({ onLoginSuccess, onBackToLanding, initial
         isOpen={helperBotOpen}
         onToggleOpen={setHelperBotOpen}
         context={{
-          userId: email.trim().toLowerCase() === 'zejithefundi@gmail.com' ? 'acc-zeji' : 'acc-default',
+          userId: 'public-login-gate',
           userName: isAdminLogin ? 'Executive Administrator' : 'Operator',
           userRole: 'ceo',
           activeTab: 'login',

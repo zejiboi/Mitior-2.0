@@ -19,15 +19,104 @@ if (!process.env.GEMINI_API_KEY) {
   console.warn("[Startup Warning] GEMINI_API_KEY is not defined in the environment. AI components will fail.");
 }
 
-// In-Memory IP Rate Limiter for DDoS and Brute Force mitigation
+const MAX_RATE_LIMIT_ENTRIES = 5000;
+const MAX_RECOVERY_CODES = 1000;
+const MAX_PAYMENT_SESSIONS = 2000;
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_FAILED_AUTH_ATTEMPTS = 5;
+const AUTH_LOCKOUT_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+
+// Bounded In-Memory IP Rate Limiter for DDoS and Brute Force mitigation
 const rateLimitsLog = new Map<string, { count: number; resetTime: number }>();
+
+// Account & PIN Brute-Force Lockout Tracker
+const failedAuthAttempts = new Map<string, { failures: number; lockedUntil: number }>();
+
+function resolveClientIp(req: express.Request): string {
+  if (process.env.TRUST_PROXY === "true") {
+    const forwarded = req.headers["x-forwarded-for"];
+    const firstHop = Array.isArray(forwarded) ? forwarded[0] : String(forwarded || "").split(",")[0];
+    if (firstHop && firstHop.trim()) {
+      return firstHop.trim();
+    }
+  }
+  return req.socket?.remoteAddress || req.ip || "unknown-client";
+}
+
+function pruneRateLimits(now: number) {
+  if (rateLimitsLog.size < MAX_RATE_LIMIT_ENTRIES) return;
+  for (const [k, v] of rateLimitsLog.entries()) {
+    if (now > v.resetTime) {
+      rateLimitsLog.delete(k);
+    }
+  }
+  if (rateLimitsLog.size >= MAX_RATE_LIMIT_ENTRIES) {
+    const oldestKey = rateLimitsLog.keys().next().value;
+    if (oldestKey) rateLimitsLog.delete(oldestKey);
+  }
+}
+
+function checkBruteForceLock(key: string): { locked: boolean; retryAfterSeconds: number } {
+  const entry = failedAuthAttempts.get(key);
+  if (!entry) return { locked: false, retryAfterSeconds: 0 };
+  const now = Date.now();
+  if (entry.lockedUntil > now) {
+    return { locked: true, retryAfterSeconds: Math.ceil((entry.lockedUntil - now) / 1000) };
+  }
+  if (entry.lockedUntil !== 0 && now >= entry.lockedUntil) {
+    failedAuthAttempts.delete(key);
+  }
+  return { locked: false, retryAfterSeconds: 0 };
+}
+
+function recordAuthFailure(key: string): { locked: boolean; attemptsRemaining: number } {
+  const now = Date.now();
+  const current = failedAuthAttempts.get(key) || { failures: 0, lockedUntil: 0 };
+  current.failures += 1;
+  if (current.failures >= MAX_FAILED_AUTH_ATTEMPTS) {
+    current.lockedUntil = now + AUTH_LOCKOUT_DURATION_MS;
+    failedAuthAttempts.set(key, current);
+    return { locked: true, attemptsRemaining: 0 };
+  }
+  failedAuthAttempts.set(key, current);
+  return { locked: false, attemptsRemaining: MAX_FAILED_AUTH_ATTEMPTS - current.failures };
+}
+
+function clearAuthFailures(key: string) {
+  failedAuthAttempts.delete(key);
+}
+
+function constantTimeStringMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(String(a), "utf-8");
+  const bufB = Buffer.from(String(b), "utf-8");
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function sanitizeInputPayload(input: any, depth = 0): any {
+  if (depth > 8 || input === null || typeof input !== "object") {
+    return input;
+  }
+  if (Array.isArray(input)) {
+    return input.map((item) => sanitizeInputPayload(item, depth + 1));
+  }
+  const cleanObj: Record<string, any> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      continue;
+    }
+    cleanObj[key] = sanitizeInputPayload(value, depth + 1);
+  }
+  return cleanObj;
+}
 
 function ipRateLimiter(maxRequests: number, windowMs: number, operationLabel: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const rawIp = req.ip || req.headers["x-forwarded-for"] || "unknown-client";
-    const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    const ip = resolveClientIp(req);
     const limiterKey = `${ip}:${operationLabel}`;
     const now = Date.now();
+    pruneRateLimits(now);
     const tracker = rateLimitsLog.get(limiterKey);
 
     if (!tracker || now > tracker.resetTime) {
@@ -48,15 +137,79 @@ function ipRateLimiter(maxRequests: number, windowMs: number, operationLabel: st
 }
 
 export const app = express();
+app.disable("x-powered-by");
+
+// Defense-in-Depth HTTP Security Headers & Strict CORS Policy
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' ws: wss: https://sandbox.safaricom.co.ke https://api.safaricom.co.ke; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  );
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "0");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+
+  if (req.path.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+  }
+
+  const origin = req.headers.origin;
+  if (origin && req.path.startsWith("/api/")) {
+    const allowedEnvOrigin = process.env.ALLOWED_ORIGIN;
+    const hostHeader = req.headers.host || "";
+    let isAllowedOrigin = false;
+    try {
+      const parsedOrigin = new URL(origin);
+      isAllowedOrigin =
+        parsedOrigin.host === hostHeader ||
+        parsedOrigin.hostname === "localhost" ||
+        parsedOrigin.hostname === "127.0.0.1" ||
+        (Boolean(allowedEnvOrigin) && origin === allowedEnvOrigin);
+    } catch {
+      isAllowedOrigin = false;
+    }
+
+    if (!isAllowedOrigin) {
+      return res.status(403).json({ error: "CORS Security Policy: Origin is not authorized." });
+    }
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+  }
+
+  next();
+});
+
 app.use(express.json({ limit: "6mb" }));
+
+// Recursive Prototype-Pollution Sanitizer
+app.use((req, _res, next) => {
+  if (req.body && typeof req.body === "object") {
+    req.body = sanitizeInputPayload(req.body);
+  }
+  if (req.query && typeof req.query === "object") {
+    req.query = sanitizeInputPayload(req.query);
+  }
+  next();
+});
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 function getDbFilePath(): string {
   return process.env.MITIOR_DB_PATH || path.join(process.cwd(), "server_db.json");
 }
 
-// In-memory recovery token store for secure password reset verification
-const recoveryCodesMap = new Map<string, { code: string; expiresAt: number }>();
+// Bounded in-memory recovery token store for secure password reset verification
+const recoveryCodesMap = new Map<string, { code: string; expiresAt: number; attempts: number }>();
 
 // Define Core Mitior OS Storage Schemas
 interface UserAccount {
@@ -65,7 +218,9 @@ interface UserAccount {
   email: string;
   passwordHash: string;
   sessionToken: string;
-  paidTicket?: "starter" | "enterprise" | "free" | null;
+  sessionExpiresAt?: number;
+  role?: "admin" | "member";
+  paidTicket?: "starter" | "professional" | "enterprise" | "free" | null;
 }
 
 interface WorkspaceBackup {
@@ -105,6 +260,16 @@ interface SyncCodeRecord {
   workspaceData?: any;
 }
 
+export interface SecurityAuditLogEntry {
+  id: string;
+  timestamp: string;
+  eventType: string;
+  severity: "INFO" | "WARN" | "CRITICAL";
+  actorId: string;
+  ip: string;
+  details: string;
+}
+
 interface DatabaseSchema {
   backups: WorkspaceBackup[];
   payments: PaymentLog[];
@@ -112,9 +277,10 @@ interface DatabaseSchema {
   users?: UserAccount[];
   syncCodes?: SyncCodeRecord[];
   assistantMemories?: Record<string, AssistantUserMemory>;
+  auditLogs?: SecurityAuditLogEntry[];
 }
 
-// Database Initialization & CRUD Engines
+// Database Initialization & Atomic CRUD Engines with 0600 Owner-Only Permissions
 function initDB() {
   const dbPath = getDbFilePath();
   if (!fs.existsSync(dbPath)) {
@@ -122,9 +288,15 @@ function initDB() {
       backups: [],
       payments: [],
       pins: [],
-      assistantMemories: {}
+      users: [],
+      syncCodes: [],
+      assistantMemories: {},
+      auditLogs: []
     };
-    fs.writeFileSync(dbPath, JSON.stringify(defaultDB, null, 2), "utf-8");
+    fs.writeFileSync(dbPath, JSON.stringify(defaultDB, null, 2), { encoding: "utf-8", mode: 0o600 });
+    try {
+      fs.chmodSync(dbPath, 0o600);
+    } catch {}
     console.log(`[Mitior DB] Successfully generated a new persistent database at ${path.basename(dbPath)}`);
   }
 }
@@ -137,21 +309,57 @@ function readDB(): DatabaseSchema {
     data.users = data.users || [];
     data.syncCodes = data.syncCodes || [];
     data.assistantMemories = data.assistantMemories || {};
+    data.auditLogs = data.auditLogs || [];
     return data;
   } catch (err) {
     console.error("[Mitior DB Error] Failed to read database, defaulting to empty arrays:", errStr(err));
-    return { backups: [], payments: [], pins: [], users: [], syncCodes: [], assistantMemories: {} };
+    return { backups: [], payments: [], pins: [], users: [], syncCodes: [], assistantMemories: {}, auditLogs: [] };
   }
 }
 
 function writeDB(data: DatabaseSchema) {
   try {
+    const dbPath = getDbFilePath();
     data.users = data.users || [];
     data.syncCodes = data.syncCodes || [];
     data.assistantMemories = data.assistantMemories || {};
-    fs.writeFileSync(getDbFilePath(), JSON.stringify(data, null, 2), "utf-8");
+    data.auditLogs = (data.auditLogs || []).slice(-500);
+    const tmpPath = `${dbPath}.tmp.${process.pid}.${crypto.randomBytes(4).toString("hex")}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
+    try {
+      fs.chmodSync(tmpPath, 0o600);
+    } catch {}
+    fs.renameSync(tmpPath, dbPath);
   } catch (err) {
     console.error("[Mitior DB Error] Failed writing database cells to disk:", errStr(err));
+  }
+}
+
+function recordSecurityAudit(
+  eventType: string,
+  severity: "INFO" | "WARN" | "CRITICAL",
+  actorId: string,
+  ip: string,
+  details: string
+) {
+  try {
+    const dbData = readDB();
+    dbData.auditLogs = dbData.auditLogs || [];
+    dbData.auditLogs.push({
+      id: "aud_" + crypto.randomBytes(6).toString("hex"),
+      timestamp: new Date().toISOString(),
+      eventType,
+      severity,
+      actorId: actorId || "anonymous",
+      ip: ip || "unknown",
+      details: String(details).substring(0, 300)
+    });
+    if (dbData.auditLogs.length > 500) {
+      dbData.auditLogs = dbData.auditLogs.slice(-500);
+    }
+    writeDB(dbData);
+  } catch (err) {
+    console.error("[Security Audit Log Error]", errStr(err));
   }
 }
 
@@ -159,14 +367,23 @@ function errStr(e: any): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// NIST SP 800-63B Compliant Memory-Hard Scrypt Password Hashing with Legacy Fallback
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString("hex");
-  const digest = crypto.createHash("sha256").update(`${salt}:${password}`).digest("hex");
-  return `${salt}:${digest}`;
+  const digest = crypto.scryptSync(String(password), salt, 64, { N: 16384, r: 8, p: 1 }).toString("hex");
+  return `scrypt:${salt}:${digest}`;
 }
 
 export function verifyPassword(password: string, storedHash: string): boolean {
-  if (!storedHash) return false;
+  if (!storedHash || typeof password !== "string") return false;
+  if (storedHash.startsWith("scrypt:")) {
+    const parts = storedHash.split(":");
+    if (parts.length !== 3) return false;
+    const [, salt, expectedDigest] = parts;
+    const actualDigest = crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 }).toString("hex");
+    if (actualDigest.length !== expectedDigest.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(actualDigest, "hex"), Buffer.from(expectedDigest, "hex"));
+  }
   if (storedHash.includes(":")) {
     const [salt, expectedDigest] = storedHash.split(":");
     const actualDigest = crypto.createHash("sha256").update(`${salt}:${password}`).digest("hex");
@@ -179,23 +396,43 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(legacyDigest, "hex"), Buffer.from(storedHash, "hex"));
 }
 
+// Memory-Hard Scrypt PIN Hashing with Legacy SHA-256 and Cleartext Fallback
 export function hashPin(pin: string): string {
-  const salt = crypto.randomBytes(12).toString("hex");
-  const digest = crypto.createHash("sha256").update(`${salt}:${pin}`).digest("hex");
-  return `${salt}:${digest}`;
+  const cleanPin = String(pin).trim();
+  const salt = crypto.randomBytes(16).toString("hex");
+  const digest = crypto.scryptSync(cleanPin, salt, 32, { N: 16384, r: 8, p: 1 }).toString("hex");
+  return `scrypt:${salt}:${digest}`;
 }
 
 export function verifyPin(pin: string, storedPinHash: string): boolean {
   const cleanPin = String(pin).trim();
   if (!storedPinHash) return false;
+  if (storedPinHash.startsWith("scrypt:")) {
+    const parts = storedPinHash.split(":");
+    if (parts.length !== 3) return false;
+    const [, salt, expectedDigest] = parts;
+    const actualDigest = crypto.scryptSync(cleanPin, salt, 32, { N: 16384, r: 8, p: 1 }).toString("hex");
+    if (actualDigest.length !== expectedDigest.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(actualDigest, "hex"), Buffer.from(expectedDigest, "hex"));
+  }
   if (storedPinHash.includes(":")) {
     const [salt, expectedDigest] = storedPinHash.split(":");
     const actualDigest = crypto.createHash("sha256").update(`${salt}:${cleanPin}`).digest("hex");
     if (actualDigest.length !== expectedDigest.length) return false;
     return crypto.timingSafeEqual(Buffer.from(actualDigest, "hex"), Buffer.from(expectedDigest, "hex"));
   }
-  // Backward-compatible verification for legacy 4-digit cleartext PINs
-  return storedPinHash === cleanPin;
+  // Constant-time backward-compatible verification for legacy 4-digit cleartext PINs
+  return constantTimeStringMatch(storedPinHash, cleanPin);
+}
+
+function isAdminAccount(user: UserAccount): boolean {
+  return (
+    user.role === "admin" ||
+    user.id === "acc-default" ||
+    user.id === "acc-zeji" ||
+    user.email === "ryan@mitior.co" ||
+    user.email === "zejithefundi@gmail.com"
+  );
 }
 
 function checkAuth(req: express.Request, userIdNeeded?: string): string | null {
@@ -204,11 +441,21 @@ function checkAuth(req: express.Request, userIdNeeded?: string): string | null {
     return null;
   }
   const token = authHeader.substring(7).trim();
+  if (!token || token.length < 16) {
+    return null;
+  }
   const dbData = readDB();
   const users = dbData.users || [];
 
-  const foundUser = users.find(u => u.sessionToken === token);
+  const foundUser = users.find(u => Boolean(u.sessionToken) && constantTimeStringMatch(u.sessionToken, token));
   if (!foundUser) return null;
+
+  if (foundUser.sessionExpiresAt && Date.now() > foundUser.sessionExpiresAt) {
+    foundUser.sessionToken = "";
+    foundUser.sessionExpiresAt = 0;
+    writeDB(dbData);
+    return null;
+  }
 
   if (userIdNeeded && foundUser.id !== userIdNeeded) {
     return null;
@@ -225,6 +472,31 @@ function requireLoggedInUser(req: express.Request, res: express.Response, next: 
   const user = dbData.users?.find(u => u.id === userId);
   if (!user) {
     return res.status(401).json({ error: "Access Denied: Account not identified on server." });
+  }
+  (req as any).userId = userId;
+  (req as any).user = user;
+  next();
+}
+
+function requireAdminUser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const userId = checkAuth(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Access Denied: Session unauthorized or expired. Please sign in again." });
+  }
+  const dbData = readDB();
+  const user = dbData.users?.find(u => u.id === userId);
+  if (!user) {
+    return res.status(401).json({ error: "Access Denied: Account not identified on server." });
+  }
+  if (!isAdminAccount(user)) {
+    recordSecurityAudit(
+      "BFLA_ADMIN_ACCESS_DENIED",
+      "WARN",
+      userId,
+      resolveClientIp(req),
+      `Non-admin user (${user.email}) attempted to access administrative endpoint ${req.path}`
+    );
+    return res.status(403).json({ error: "Access Denied: Administrator privileges are required to access this resource." });
   }
   (req as any).userId = userId;
   (req as any).user = user;
@@ -257,7 +529,7 @@ function requireSaaSUser(req: express.Request, res: express.Response, next: expr
   next();
 }
 
-// Simple in-memory tracker for real-time STK callback state matching
+// Bounded in-memory tracker for real-time STK callback state matching
 interface PaymentSession {
   id: string; // CheckoutRequestID or transaction id
   phone: string;
@@ -267,10 +539,41 @@ interface PaymentSession {
   timestamp: number;
   metadata?: any;
   userId?: string;
-  planId?: "starter" | "enterprise";
+  planId?: "starter" | "professional" | "enterprise";
 }
 
 const paymentSessions = new Map<string, PaymentSession>();
+
+function setBoundedPaymentSession(id: string, session: PaymentSession) {
+  const now = Date.now();
+  if (paymentSessions.size >= MAX_PAYMENT_SESSIONS) {
+    for (const [k, v] of paymentSessions.entries()) {
+      if (now - v.timestamp > SESSION_TTL_MS) {
+        paymentSessions.delete(k);
+      }
+    }
+    if (paymentSessions.size >= MAX_PAYMENT_SESSIONS) {
+      const oldestKey = paymentSessions.keys().next().value;
+      if (oldestKey) paymentSessions.delete(oldestKey);
+    }
+  }
+  paymentSessions.set(id, session);
+}
+
+function parseValidatedPaymentAmount(rawAmount: any): number | null {
+  const numericAmount = Number(rawAmount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 10_000_000) {
+    return null;
+  }
+  return Math.round(numericAmount * 100) / 100;
+}
+
+function resolvePlanTier(planName: any): "starter" | "professional" | "enterprise" {
+  const normalized = String(planName || "").toLowerCase();
+  if (normalized.includes("enterprise")) return "enterprise";
+  if (normalized.includes("professional")) return "professional";
+  return "starter";
+}
 
 // API: Health probe
 app.get("/api/health", (req, res) => {
@@ -309,12 +612,24 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
   const { phone, amount, planName } = req.body;
   const activeUserId = (req as any).userId;
 
-  if (!phone || !amount) {
+  if (!phone || amount === undefined || amount === null) {
     return res.status(400).json({ error: "Phone number and Amount are required." });
   }
 
+  const validatedAmount = parseValidatedPaymentAmount(amount);
+  if (validatedAmount === null) {
+    recordSecurityAudit(
+      "PAYMENT_INVALID_AMOUNT",
+      "WARN",
+      activeUserId,
+      resolveClientIp(req),
+      `Rejected invalid M-Pesa payment amount: ${String(amount)}`
+    );
+    return res.status(400).json({ error: "Security validation: Payment amount must be a positive finite number." });
+  }
+
   // Format phone to standard Kenyan format: 2547XXXXXXXX or 2541XXXXXXXX
-  let formattedPhone = phone.trim().replace(/\s+/g, "");
+  let formattedPhone = String(phone).trim().replace(/\s+/g, "");
   if (formattedPhone.startsWith("0")) {
     formattedPhone = "254" + formattedPhone.substring(1);
   } else if (formattedPhone.startsWith("+")) {
@@ -327,20 +642,20 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
     });
   }
 
-  const checkoutRequestId = "ws_CO_" + Math.random().toString(36).substring(2, 12).toUpperCase();
+  const checkoutRequestId = "ws_CO_" + crypto.randomBytes(6).toString("hex").toUpperCase();
 
   // Create active session in local store
   const newSession: PaymentSession = {
     id: checkoutRequestId,
     phone: formattedPhone,
-    amount: Number(amount),
+    amount: validatedAmount,
     paymentMethod: "mpesa",
     status: "PENDING",
     timestamp: Date.now(),
     userId: activeUserId,
-    planId: String(planName || "").toLowerCase().includes("enterprise") ? "enterprise" : "starter"
+    planId: resolvePlanTier(planName)
   };
-  paymentSessions.set(checkoutRequestId, newSession);
+  setBoundedPaymentSession(checkoutRequestId, newSession);
 
   // If real Daraja API keys are configured, attempt real STK Push
   const consumerKey = process.env.MPESA_CONSUMER_KEY;
@@ -390,7 +705,7 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
         Password: password,
         Timestamp: timestamp,
         TransactionType: "CustomerPayBillOnline",
-        Amount: Number(amount),
+        Amount: validatedAmount,
         PartyA: Number(formattedPhone),
         PartyB: Number(shortcode),
         PhoneNumber: Number(formattedPhone),
@@ -399,7 +714,7 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
         TransactionDesc: "License Subscription Payment",
       };
 
-      console.log(`[M-Pesa API] Triggering Lipa Na M-Pesa STK Push to ${formattedPhone} for KES ${amount}...`);
+      console.log(`[M-Pesa API] Triggering Lipa Na M-Pesa STK Push to ${formattedPhone} for KES ${validatedAmount}...`);
       
       const stkResponse = await fetch(stkUrl, {
         method: "POST",
@@ -418,7 +733,7 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
         // Update session with official IDs
         const officialRequestId = stkData.CheckoutRequestID || checkoutRequestId;
         paymentSessions.delete(checkoutRequestId);
-        paymentSessions.set(officialRequestId, {
+        setBoundedPaymentSession(officialRequestId, {
           ...newSession,
           id: officialRequestId,
           metadata: { merchantRequestId: stkData.MerchantRequestID },
@@ -441,7 +756,7 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
 
   // --- MPESA SANDBOX SIMULATION SYSTEM ---
   // If credentials are absent or fail, deploy our developer sandbox experience
-  console.log(`[M-Pesa Simulator] Launching virtual Safaricom STK Push for ${formattedPhone} (Amount: KES ${amount})`);
+  console.log(`[M-Pesa Simulator] Launching virtual Safaricom STK Push for ${formattedPhone} (Amount: KES ${validatedAmount})`);
   
   // Schedule an asynchronous simulation callback mimicking Safaricom's webhook trigger
   setTimeout(async () => {
@@ -452,14 +767,14 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
       const callbackResultBody = {
         Body: {
           stkCallback: {
-            MerchantRequestID: "MOCK_MERCH_" + Math.random().toString(36).substring(5, 12).toUpperCase(),
+            MerchantRequestID: "MOCK_MERCH_" + crypto.randomBytes(4).toString("hex").toUpperCase(),
             CheckoutRequestID: checkoutRequestId,
             ResultCode: 0,
             ResultDesc: "The service request is processed successfully.",
             CallbackMetadata: {
               Item: [
-                { Name: "Amount", Value: amount },
-                { Name: "MpesaReceiptNumber", Value: "Q" + Math.random().toString(36).substring(2, 11).toUpperCase() },
+                { Name: "Amount", Value: validatedAmount },
+                { Name: "MpesaReceiptNumber", Value: "Q" + crypto.randomBytes(5).toString("hex").toUpperCase() },
                 { Name: "TransactionDate", Value: Date.now() },
                 { Name: "PhoneNumber", Value: Number(formattedPhone) }
               ]
@@ -485,22 +800,30 @@ app.post("/api/checkout/mpesa-push", ipRateLimiter(5, 60 * 1000, "M-Pesa Checkou
   return res.json({
     success: true,
     mode: "simulated",
-    message: "💡 [Developer Sandbox Sandbox] Virtual Lipa Na M-Pesa STK Push sent! We scheduled a payment callback in 5 seconds.",
+    message: "💡 [Developer Sandbox] Virtual Lipa Na M-Pesa STK Push sent! We scheduled a payment callback in 5 seconds.",
     checkoutRequestId: checkoutRequestId,
   });
 });
 
 // C. M-PESA WEBHOOK CALLBACK (Safaricom calls this on payment response)
-app.post("/api/checkout/mpesa-callback", (req, res) => {
-  const querySecret = req.query.secret;
-  const expectedSecret = process.env.MPESA_CALLBACK_SECRET || "simulate-secret-token";
-  if (!querySecret || querySecret !== expectedSecret) {
-    console.error(`[Security Webhook Alert] Rejected unauthenticated callback event from IP: ${req.ip}`);
+app.post("/api/checkout/mpesa-callback", ipRateLimiter(30, 60 * 1000, "M-Pesa Webhook Callback"), (req, res) => {
+  const querySecret = String(req.query.secret || "");
+  const isStrictProd = process.env.NODE_ENV === "production" && process.env.MITIOR_TEST_MODE !== "true";
+  const expectedSecret = isStrictProd
+    ? (process.env.MPESA_CALLBACK_SECRET || "")
+    : (process.env.MPESA_CALLBACK_SECRET || "simulate-secret-token");
+
+  if (!querySecret || !expectedSecret || !constantTimeStringMatch(querySecret, expectedSecret)) {
+    recordSecurityAudit(
+      "WEBHOOK_SIGNATURE_MISMATCH",
+      "WARN",
+      "webhook",
+      resolveClientIp(req),
+      "Rejected M-Pesa callback with invalid or missing webhook signature secret."
+    );
+    console.error(`[Security Webhook Alert] Rejected unauthenticated callback event from IP: ${resolveClientIp(req)}`);
     return res.status(401).json({ error: "Access Denied: Unmatched callback signature secret." });
   }
-
-  console.log("[M-Pesa Callback Recipient] Signature token is valid. Received payload from Safaricom API Gateway:");
-  console.log(JSON.stringify(req.body, null, 2));
 
   try {
     const body = req.body?.Body;
@@ -509,11 +832,12 @@ app.post("/api/checkout/mpesa-callback", (req, res) => {
     }
 
     const { CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = body.stkCallback;
+    console.log(`[M-Pesa Callback Recipient] Verified webhook signature for CheckoutRequestID=${String(CheckoutRequestID || "unknown")}, ResultCode=${String(ResultCode)}`);
     const session = paymentSessions.get(CheckoutRequestID);
 
     if (session) {
       if (ResultCode === 0 || ResultCode === "0") {
-        const receiptNo = CallbackMetadata?.Item?.find((i: any) => i.Name === "MpesaReceiptNumber")?.Value || "SIM_" + Math.random().toString(36).substring(5, 12).toUpperCase();
+        const receiptNo = CallbackMetadata?.Item?.find((i: any) => i.Name === "MpesaReceiptNumber")?.Value || "SIM_" + crypto.randomBytes(4).toString("hex").toUpperCase();
         
         session.status = "SUCCESS";
         session.metadata = {
@@ -543,7 +867,7 @@ app.post("/api/checkout/mpesa-callback", (req, res) => {
             paymentMethod: "mpesa",
             status: "SUCCESS",
             timestamp: Date.now(),
-            planName: session.planId === "enterprise" ? "Enterprise Local App" : "Web App Node Tier",
+            planName: session.planId === "enterprise" ? "Enterprise Local App" : session.planId === "professional" ? "Professional Web App" : "Web App Node Tier",
             receiptNumber: receiptNo,
             userId: session.userId
           };
@@ -577,7 +901,7 @@ app.post("/api/checkout/mpesa-callback", (req, res) => {
           console.error("Failed log cancellation to DB:", errStr(dbErr));
         }
       }
-      paymentSessions.set(CheckoutRequestID, session);
+      setBoundedPaymentSession(CheckoutRequestID, session);
     } else {
       console.warn(`[M-Pesa Webhook Warning] No cached tracking session found for Request ID: ${CheckoutRequestID}`);
     }
@@ -595,23 +919,38 @@ app.post("/api/checkout/card-pay", ipRateLimiter(5, 60 * 1000, "Card Payment Tri
   const { blockCard, amount, holderName, planName } = req.body;
   const activeUserId = (req as any).userId;
 
-  if (!blockCard || !amount || !holderName) {
+  if (!blockCard || amount === undefined || amount === null || !holderName) {
     return res.status(400).json({ error: "Card credentials, Amount, and Card Holder Name are required." });
+  }
+
+  const validatedAmount = parseValidatedPaymentAmount(amount);
+  if (validatedAmount === null) {
+    recordSecurityAudit(
+      "PAYMENT_INVALID_AMOUNT",
+      "WARN",
+      activeUserId,
+      resolveClientIp(req),
+      `Rejected invalid Card payment amount: ${String(amount)}`
+    );
+    return res.status(400).json({ error: "Security validation: Payment amount must be a positive finite number." });
   }
 
   // SECURE API GUARD: Sanitize inputs and protect card digits
   const cardStr = String(blockCard).replace(/\s+/g, "");
-  const lastFour = cardStr.length >= 4 ? cardStr.slice(-4) : "1111";
+  if (!/^\d{12,19}$/.test(cardStr)) {
+    return res.status(400).json({ error: "Invalid card number format." });
+  }
+  const lastFour = cardStr.slice(-4);
 
-  const transactionId = "ws_TX_" + Math.random().toString(36).substring(2, 12).toUpperCase();
-  const receiptNumber = "CARD_REC" + Math.random().toString(36).substring(2, 9).toUpperCase();
-  const planId = String(planName || "").toLowerCase().includes("enterprise") ? "enterprise" : "starter";
+  const transactionId = "ws_TX_" + crypto.randomBytes(6).toString("hex").toUpperCase();
+  const receiptNumber = "CARD_REC" + crypto.randomBytes(5).toString("hex").toUpperCase();
+  const planId = resolvePlanTier(planName);
 
   // Create immediate success status for simulation or real Stripe integration
   const newSession: PaymentSession = {
     id: transactionId,
     phone: "card_payment",
-    amount: Number(amount),
+    amount: validatedAmount,
     paymentMethod: "card",
     status: "SUCCESS", 
     timestamp: Date.now(),
@@ -619,17 +958,17 @@ app.post("/api/checkout/card-pay", ipRateLimiter(5, 60 * 1000, "Card Payment Tri
     planId: planId,
     metadata: {
       receiptNumber: receiptNumber,
-      holder: holderName,
+      holder: String(holderName).trim().substring(0, 120),
       plan: planName || "MitiorOS Upgrades"
     }
   };
 
-  paymentSessions.set(transactionId, newSession);
+  setBoundedPaymentSession(transactionId, newSession);
 
   // If Stripe key is configured, you can perform actual charges
   const stripeSecret = process.env.STRIPE_SECRET_KEY;
   if (stripeSecret) {
-    console.log(`[Card Stripe] Key detected. Processing charging profile for KES ${amount}...`);
+    console.log(`[Card Stripe] Key detected. Processing charging profile for KES ${validatedAmount}...`);
   }
 
   // PERSIST TO DATABASE
@@ -645,16 +984,23 @@ app.post("/api/checkout/card-pay", ipRateLimiter(5, 60 * 1000, "Card Payment Tri
     const newPayLog: PaymentLog = {
       id: transactionId,
       phoneOrCard: `Card ending in *${lastFour}`,
-      amount: Number(amount),
+      amount: validatedAmount,
       paymentMethod: "card",
       status: "SUCCESS",
       timestamp: Date.now(),
-      planName: planId === "enterprise" ? "Enterprise Local App" : "Web App Node Tier",
+      planName: planId === "enterprise" ? "Enterprise Local App" : planId === "professional" ? "Professional Web App" : "Web App Node Tier",
       receiptNumber: receiptNumber,
       userId: activeUserId
     };
     dbData.payments.push(newPayLog);
     writeDB(dbData);
+    recordSecurityAudit(
+      "PAYMENT_COMPLETED",
+      "INFO",
+      activeUserId,
+      resolveClientIp(req),
+      `Card payment processed for plan=${planId}, amount=${validatedAmount}`
+    );
   } catch (dbErr: any) {
     console.error("Failed persisting card payment log:", errStr(dbErr));
   }
@@ -663,7 +1009,7 @@ app.post("/api/checkout/card-pay", ipRateLimiter(5, 60 * 1000, "Card Payment Tri
     success: true,
     message: "Debit/Credit Card processed successfully!",
     transactionId: transactionId,
-    amount: amount,
+    amount: validatedAmount,
     receiptNumber: receiptNumber,
   });
 });
@@ -702,7 +1048,6 @@ app.get("/api/checkout/status/:requestId", requireLoggedInUser, (req, res) => {
   });
 });
 
-// G. DATABASE CORE BACKUP & CLOUD AUTO-SYNC ENDPOINTS
 // G. PERSISTENT SAAS USER AUTHENTICATION ENDPOINTS
 app.post("/api/auth/signup", ipRateLimiter(5, 60 * 1000, "User Signup"), (req, res) => {
   try {
@@ -724,20 +1069,30 @@ app.post("/api/auth/signup", ipRateLimiter(5, 60 * 1000, "User Signup"), (req, r
       return res.status(409).json({ error: "Account associated with this email already exists." });
     }
 
-    const userId = "acc-" + Math.random().toString(36).substring(2, 12).toUpperCase();
+    const userId = "acc-" + crypto.randomBytes(6).toString("hex").toUpperCase();
     const sessionToken = "tok_" + crypto.randomBytes(24).toString("hex");
+    const isElevatedCorporate = cleanEmail === "zejithefundi@gmail.com" || cleanEmail === "ryan@mitior.co";
     const newUser: UserAccount = {
       id: userId,
-      name: String(name).trim(),
+      name: String(name).trim().substring(0, 120),
       email: cleanEmail,
-      passwordHash: hashPassword(password),
+      passwordHash: hashPassword(String(password)),
       sessionToken: sessionToken,
-      paidTicket: (cleanEmail === "zejithefundi@gmail.com" || cleanEmail === "ryan@mitior.co") ? "enterprise" : undefined
+      sessionExpiresAt: Date.now() + SESSION_TTL_MS,
+      role: isElevatedCorporate ? "admin" : "member",
+      paidTicket: isElevatedCorporate ? "enterprise" : undefined
     };
 
     dbData.users.push(newUser);
     writeDB(dbData);
 
+    recordSecurityAudit(
+      "AUTH_SIGNUP_SUCCESS",
+      "INFO",
+      userId,
+      resolveClientIp(req),
+      `Registered tenant ${cleanEmail}`
+    );
     console.log(`[Security Auth] Registered server-side tenant ${cleanEmail} (ID: ${userId})`);
     res.json({
       success: true,
@@ -745,7 +1100,7 @@ app.post("/api/auth/signup", ipRateLimiter(5, 60 * 1000, "User Signup"), (req, r
       sessionToken: sessionToken
     });
   } catch (err: any) {
-    res.status(500).json({ error: "Signup system exception: " + err.message });
+    res.status(500).json({ error: "Signup system exception." });
   }
 });
 
@@ -756,6 +1111,14 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
       return res.status(400).json({ error: "Provide email and password to authenticate." });
     }
     const cleanEmail = String(email).trim().toLowerCase();
+    const lockKey = `login:${cleanEmail}`;
+    const lockCheck = checkBruteForceLock(lockKey);
+    if (lockCheck.locked) {
+      return res.status(429).json({
+        error: `Account temporarily locked due to repeated failed login attempts. Try again in ${lockCheck.retryAfterSeconds} seconds.`
+      });
+    }
+
     const dbData = readDB();
     dbData.users = dbData.users || [];
 
@@ -769,6 +1132,8 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
         email: cleanEmail,
         passwordHash: hashPassword(password),
         sessionToken: sessionToken,
+        sessionExpiresAt: Date.now() + SESSION_TTL_MS,
+        role: "admin",
         paidTicket: "enterprise"
       };
       dbData.users.push(defaultUser);
@@ -785,6 +1150,8 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
         email: cleanEmail,
         passwordHash: hashPassword(password),
         sessionToken: sessionToken,
+        sessionExpiresAt: Date.now() + SESSION_TTL_MS,
+        role: "admin",
         paidTicket: "enterprise"
       };
       dbData.users.push(creatorUser);
@@ -793,16 +1160,27 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
 
     const found = dbData.users.find(u => u.email === cleanEmail);
     if (!found || !verifyPassword(String(password), found.passwordHash)) {
+      const failureState = recordAuthFailure(lockKey);
+      recordSecurityAudit(
+        "AUTH_LOGIN_FAILURE",
+        failureState.locked ? "CRITICAL" : "WARN",
+        cleanEmail,
+        resolveClientIp(req),
+        `Failed login attempt for ${cleanEmail} (locked=${failureState.locked})`
+      );
       return res.status(401).json({ error: "Invalid email or password combination." });
     }
 
-    // Upgrade legacy unsalted password hash to salted SHA-256 on successful login
-    if (!found.passwordHash.includes(":")) {
+    clearAuthFailures(lockKey);
+
+    // Upgrade legacy unsalted or single-round SHA-256 password hash to memory-hard scrypt on login
+    if (!found.passwordHash.startsWith("scrypt:")) {
       found.passwordHash = hashPassword(String(password));
     }
 
-    // Refresh of token on clean authentication
+    // Refresh of token on clean authentication with 24h expiration TTL
     found.sessionToken = "tok_" + crypto.randomBytes(24).toString("hex");
+    found.sessionExpiresAt = Date.now() + SESSION_TTL_MS;
     
     let activePaidTicket = found.paidTicket || null;
     if ((found.id === "acc-default" || found.id === "acc-zeji" || found.email === "zejithefundi@gmail.com") && !found.paidTicket) {
@@ -811,6 +1189,13 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
     }
     
     writeDB(dbData);
+    recordSecurityAudit(
+      "AUTH_LOGIN_SUCCESS",
+      "INFO",
+      found.id,
+      resolveClientIp(req),
+      `Successful login for ${found.email}`
+    );
 
     res.json({
       success: true,
@@ -822,6 +1207,30 @@ app.post("/api/auth/login", ipRateLimiter(10, 60 * 1000, "User Login"), (req, re
   }
 });
 
+app.post("/api/auth/logout", requireLoggedInUser, (req, res) => {
+  try {
+    const activeUserId = (req as any).userId;
+    const dbData = readDB();
+    dbData.users = dbData.users || [];
+    const user = dbData.users.find(u => u.id === activeUserId);
+    if (user) {
+      user.sessionToken = "";
+      user.sessionExpiresAt = 0;
+      writeDB(dbData);
+    }
+    recordSecurityAudit(
+      "AUTH_LOGOUT",
+      "INFO",
+      activeUserId,
+      resolveClientIp(req),
+      "Server-side session token explicitly revoked via logout."
+    );
+    return res.json({ success: true, message: "Session terminated and token revoked." });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Logout server exception." });
+  }
+});
+
 app.post("/api/auth/verify-code", ipRateLimiter(8, 60 * 1000, "Recovery Code Dispatch"), (req, res) => {
   try {
     const { email } = req.body;
@@ -829,18 +1238,56 @@ app.post("/api/auth/verify-code", ipRateLimiter(8, 60 * 1000, "Recovery Code Dis
       return res.status(400).json({ error: "Email address is required to generate a recovery code." });
     }
     const cleanEmail = String(email).trim().toLowerCase();
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Use CSPRNG crypto.randomInt instead of Math.random()
+    const code = crypto.randomInt(100000, 1000000).toString();
+
+    if (recoveryCodesMap.size >= MAX_RECOVERY_CODES) {
+      const now = Date.now();
+      for (const [k, v] of recoveryCodesMap.entries()) {
+        if (now > v.expiresAt) recoveryCodesMap.delete(k);
+      }
+      if (recoveryCodesMap.size >= MAX_RECOVERY_CODES) {
+        const oldestKey = recoveryCodesMap.keys().next().value;
+        if (oldestKey) recoveryCodesMap.delete(oldestKey);
+      }
+    }
+
     recoveryCodesMap.set(cleanEmail, {
       code,
-      expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes validity
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes validity
+      attempts: 0
     });
-    res.json({
+
+    recordSecurityAudit(
+      "AUTH_RECOVERY_CODE_ISSUED",
+      "INFO",
+      cleanEmail,
+      resolveClientIp(req),
+      "Generated 6-digit password recovery code."
+    );
+
+    // SECURITY CONTROL: Never disclose recoveryCode in HTTP response when running in strict production mode
+    const allowSandboxCodeDisclosure =
+      process.env.MITIOR_TEST_MODE === "true" ||
+      process.env.MITIOR_ALLOW_SANDBOX_OTP === "true" ||
+      process.env.NODE_ENV !== "production";
+
+    if (allowSandboxCodeDisclosure) {
+      return res.json({
+        success: true,
+        recoveryCode: code,
+        expiresInSeconds: 600
+      });
+    }
+
+    return res.json({
       success: true,
-      recoveryCode: code,
+      deliveryChannel: "out-of-band",
+      message: "If an account exists for this email, a 6-digit recovery code has been dispatched.",
       expiresInSeconds: 600
     });
   } catch (err: any) {
-    res.status(500).json({ error: "Recovery code dispatch exception: " + errStr(err) });
+    res.status(500).json({ error: "Recovery code dispatch exception." });
   }
 });
 
@@ -866,13 +1313,43 @@ app.post("/api/auth/reset-password", ipRateLimiter(5, 60 * 1000, "Password Reset
     const authenticatedUserId = checkAuth(req, found.id);
     const providedCode = String(recoveryCode || resetToken || "").trim();
     const storedRecovery = recoveryCodesMap.get(cleanEmail);
+
+    if (!authenticatedUserId && storedRecovery && storedRecovery.attempts >= MAX_FAILED_AUTH_ATTEMPTS) {
+      recoveryCodesMap.delete(cleanEmail);
+      recordSecurityAudit(
+        "AUTH_RECOVERY_CODE_LOCKOUT",
+        "CRITICAL",
+        cleanEmail,
+        resolveClientIp(req),
+        "Recovery code invalidated after exceeding maximum failed verification attempts."
+      );
+      return res.status(429).json({
+        error: "Recovery code invalidated due to too many failed attempts. Please request a new recovery code."
+      });
+    }
+
     const hasValidRecoveryCode =
-      !!providedCode &&
-      !!storedRecovery &&
-      storedRecovery.expiresAt >= Date.now() &&
-      storedRecovery.code === providedCode;
+      Boolean(providedCode) &&
+      Boolean(storedRecovery) &&
+      storedRecovery!.expiresAt >= Date.now() &&
+      constantTimeStringMatch(storedRecovery!.code, providedCode);
 
     if (!authenticatedUserId && !hasValidRecoveryCode) {
+      if (storedRecovery && providedCode) {
+        storedRecovery.attempts += 1;
+        if (storedRecovery.attempts >= MAX_FAILED_AUTH_ATTEMPTS) {
+          recoveryCodesMap.delete(cleanEmail);
+        } else {
+          recoveryCodesMap.set(cleanEmail, storedRecovery);
+        }
+      }
+      recordSecurityAudit(
+        "AUTH_PASSWORD_RESET_DENIED",
+        "WARN",
+        cleanEmail,
+        resolveClientIp(req),
+        "Rejected unauthenticated or invalid recovery code password reset attempt."
+      );
       return res.status(401).json({
         error: "Access Denied: Password reset requires a verified recovery code or an active authenticated session."
       });
@@ -881,16 +1358,24 @@ app.post("/api/auth/reset-password", ipRateLimiter(5, 60 * 1000, "Password Reset
     found.passwordHash = hashPassword(String(password));
     // Revoke current session token to enforce re-login
     found.sessionToken = "";
+    found.sessionExpiresAt = 0;
     recoveryCodesMap.delete(cleanEmail);
     writeDB(dbData);
 
+    recordSecurityAudit(
+      "AUTH_PASSWORD_RESET_SUCCESS",
+      "INFO",
+      found.id,
+      resolveClientIp(req),
+      `Password reset completed and active session revoked for ${cleanEmail}`
+    );
     console.log(`[Security Auth] Successfully reset password for server-side user ${cleanEmail}`);
     res.json({
       success: true,
       message: "Password reset successfully! Log in with your new credentials."
     });
   } catch (err: any) {
-    res.status(500).json({ error: "Reset password server exception: " + err.message });
+    res.status(500).json({ error: "Reset password server exception." });
   }
 });
 
@@ -903,7 +1388,7 @@ app.get("/api/sync-codes", requireLoggedInUser, (req, res) => {
     const filtered = dbData.syncCodes.filter(s => s.creatorUserId === creatorUserId);
     res.json({ success: true, syncCodes: filtered });
   } catch (err: any) {
-    res.status(500).json({ error: "Failed to retrieve sync codes: " + err.message });
+    res.status(500).json({ error: "Failed to retrieve sync codes." });
   }
 });
 
@@ -914,7 +1399,11 @@ app.post("/api/sync-codes/create", ipRateLimiter(20, 60 * 1000, "Create Sync Cod
     if (!projectId || !projectName) {
       return res.status(400).json({ error: "Project configuration is required." });
     }
-    const cleanDesc = String(description || "").trim() || "Multi-node synchronization network key.";
+    const payloadSize = JSON.stringify(req.body || {}).length;
+    if (payloadSize > 5 * 1024 * 1024) {
+      return res.status(413).json({ error: "Sync code workspace payload exceeds 5MB security limit." });
+    }
+    const cleanDesc = String(description || "").trim().substring(0, 240) || "Multi-node synchronization network key.";
     
     // Generate code S-OS-XXXX-YYYY
     const codePart1 = crypto.randomBytes(3).toString("hex").toUpperCase();
@@ -927,8 +1416,8 @@ app.post("/api/sync-codes/create", ipRateLimiter(20, 60 * 1000, "Create Sync Cod
     const newRecord: SyncCodeRecord = {
       code: syncCode,
       creatorUserId,
-      projectId: String(projectId),
-      projectName: String(projectName),
+      projectId: String(projectId).substring(0, 120),
+      projectName: String(projectName).substring(0, 120),
       description: cleanDesc,
       createdAt: Date.now(),
       workspaceData: workspaceData || undefined
@@ -940,7 +1429,7 @@ app.post("/api/sync-codes/create", ipRateLimiter(20, 60 * 1000, "Create Sync Cod
     console.log(`[Sync Engine] Successfully generated sync code ${syncCode} for Project ${projectName}`);
     res.json({ success: true, syncCode: newRecord });
   } catch (err: any) {
-    res.status(500).json({ error: "Failed to generate sync code: " + err.message });
+    res.status(500).json({ error: "Failed to generate sync code." });
   }
 });
 
@@ -961,16 +1450,16 @@ app.post("/api/sync-codes/delete", requireLoggedInUser, (req, res) => {
     writeDB(dbData);
     res.json({ success: true, message: "Sync code removed successfully!" });
   } catch (err: any) {
-    res.status(500).json({ error: "Failed to delete sync code: " + err.message });
+    res.status(500).json({ error: "Failed to delete sync code." });
   }
 });
 
-app.get("/api/sync-codes/verify/:code", (req, res) => {
+app.get("/api/sync-codes/verify/:code", ipRateLimiter(15, 60 * 1000, "Verify Sync Code"), (req, res) => {
   try {
     const code = String(req.params.code).trim().toUpperCase();
     const dbData = readDB();
     dbData.syncCodes = dbData.syncCodes || [];
-    const foundCode = dbData.syncCodes.find(s => s.code.toUpperCase() === code);
+    const foundCode = dbData.syncCodes.find(s => constantTimeStringMatch(s.code.toUpperCase(), code));
     if (!foundCode) {
       return res.status(404).json({ error: "Mismatched or invalid verification code. Please request a new code from your workspace administrator." });
     }
@@ -992,7 +1481,7 @@ app.get("/api/sync-codes/verify/:code", (req, res) => {
       workspaceData: foundCode.workspaceData || null
     });
   } catch (err: any) {
-    res.status(500).json({ error: "Failed to verify sync code: " + err.message });
+    res.status(500).json({ error: "Failed to verify sync code." });
   }
 });
 
@@ -1010,7 +1499,7 @@ app.get("/api/auth/me", requireLoggedInUser, (req, res) => {
       }
     });
   } catch (err: any) {
-    res.status(500).json({ error: "Session synchronization exception: " + err.message });
+    res.status(500).json({ error: "Session synchronization exception." });
   }
 });
 
@@ -1037,7 +1526,7 @@ app.post("/api/db/backup", requireSaaSUser, (req, res) => {
     }
 
     const dbData = readDB();
-    const backupId = "bk_" + Math.random().toString(36).substring(2, 12).toUpperCase();
+    const backupId = "bk_" + crypto.randomBytes(6).toString("hex").toUpperCase();
     const newBackup: WorkspaceBackup = {
       id: backupId,
       userId: String(userId).trim(),
@@ -1064,7 +1553,7 @@ app.post("/api/db/backup", requireSaaSUser, (req, res) => {
     console.log(`[Backup Node Success] Backed up ${projectName} for account ${userId}. ID: ${backupId}`);
     res.json({ success: true, backupId, timestamp: newBackup.timestamp });
   } catch (err: any) {
-    res.status(500).json({ error: "Server database write exception: " + err.message });
+    res.status(500).json({ error: "Server database write exception." });
   }
 });
 
@@ -1137,7 +1626,7 @@ app.delete("/api/db/backup/:backupId", requireSaaSUser, (req, res) => {
     writeDB(dbData);
     res.json({ success: true, message: "Backup successfully deleted." });
   } catch (err: any) {
-    res.status(500).json({ error: "Deletion processing breakdown: " + err.message });
+    res.status(500).json({ error: "Deletion processing breakdown." });
   }
 });
 
@@ -1145,6 +1634,10 @@ app.delete("/api/db/backup/:backupId", requireSaaSUser, (req, res) => {
 app.get("/api/security/pin/status/:userId", requireSaaSUser, (req, res) => {
   try {
     const { userId } = req.params;
+    const verifiedUserId = checkAuth(req, userId);
+    if (!verifiedUserId) {
+      return res.status(403).json({ error: "Access Denied: Cannot inspect another tenant's PIN status." });
+    }
     const dbData = readDB();
     const record = dbData.pins.find(p => p.userId === userId);
     res.json({ configured: !!record });
@@ -1153,7 +1646,7 @@ app.get("/api/security/pin/status/:userId", requireSaaSUser, (req, res) => {
   }
 });
 
-app.post("/api/security/pin/set", requireSaaSUser, (req, res) => {
+app.post("/api/security/pin/set", ipRateLimiter(10, 60 * 1000, "PIN Configuration"), requireSaaSUser, (req, res) => {
   try {
     const { userId, pin } = req.body;
     if (!userId || !pin) {
@@ -1179,13 +1672,15 @@ app.post("/api/security/pin/set", requireSaaSUser, (req, res) => {
       dbData.pins.push({ userId, pinHash: saltedPinHash });
     }
     writeDB(dbData);
+    clearAuthFailures(`pin:${userId}`);
+    recordSecurityAudit("PIN_CONFIGURED", "INFO", userId, resolveClientIp(req), "Security Shield PIN configured.");
     res.json({ success: true, message: "Credential locker synchronized." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to configure PIN." });
   }
 });
 
-app.post("/api/security/pin/verify", requireSaaSUser, (req, res) => {
+app.post("/api/security/pin/verify", ipRateLimiter(10, 60 * 1000, "PIN Verification"), requireSaaSUser, (req, res) => {
   try {
     const { userId, pin } = req.body;
     if (!userId) {
@@ -1198,6 +1693,15 @@ app.post("/api/security/pin/verify", requireSaaSUser, (req, res) => {
       return res.status(401).json({ error: "Access Denied: Session unauthorized." });
     }
 
+    const lockKey = `pin:${userId}`;
+    const lockCheck = checkBruteForceLock(lockKey);
+    if (lockCheck.locked) {
+      return res.status(429).json({
+        success: false,
+        error: `Security PIN locked due to repeated failed attempts. Try again in ${lockCheck.retryAfterSeconds} seconds.`
+      });
+    }
+
     const dbData = readDB();
     const record = dbData.pins.find(p => p.userId === userId);
     if (!record) {
@@ -1205,16 +1709,35 @@ app.post("/api/security/pin/verify", requireSaaSUser, (req, res) => {
       return res.json({ success: true, notConfigured: true });
     }
     if (verifyPin(String(pin || ""), record.pinHash)) {
+      clearAuthFailures(lockKey);
+      if (!record.pinHash.startsWith("scrypt:")) {
+        record.pinHash = hashPin(String(pin || ""));
+        writeDB(dbData);
+      }
       return res.json({ success: true });
     } else {
+      const failureState = recordAuthFailure(lockKey);
+      recordSecurityAudit(
+        "PIN_VERIFY_FAILURE",
+        failureState.locked ? "CRITICAL" : "WARN",
+        userId,
+        resolveClientIp(req),
+        `Failed Security Shield PIN verification (locked=${failureState.locked})`
+      );
+      if (failureState.locked) {
+        return res.status(429).json({
+          success: false,
+          error: "Security PIN temporarily locked after 5 failed attempts."
+        });
+      }
       return res.status(401).json({ success: false, error: "Authentication failed: Unmatched PIN code." });
     }
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "PIN verification failure." });
   }
 });
 
-app.post("/api/security/pin/remove", requireSaaSUser, (req, res) => {
+app.post("/api/security/pin/remove", ipRateLimiter(10, 60 * 1000, "PIN Removal"), requireSaaSUser, (req, res) => {
   try {
     const { userId, pin } = req.body;
     if (!userId || !pin) {
@@ -1226,6 +1749,14 @@ app.post("/api/security/pin/remove", requireSaaSUser, (req, res) => {
     if (!verifiedUserId) {
       return res.status(401).json({ error: "Access Denied: Session unauthorized." });
     }
+
+    const lockKey = `pin:${userId}`;
+    const lockCheck = checkBruteForceLock(lockKey);
+    if (lockCheck.locked) {
+      return res.status(429).json({
+        error: `Security PIN locked due to repeated failed attempts. Try again in ${lockCheck.retryAfterSeconds} seconds.`
+      });
+    }
     
     const dbData = readDB();
     const pinIndex = dbData.pins.findIndex(p => p.userId === userId);
@@ -1233,52 +1764,42 @@ app.post("/api/security/pin/remove", requireSaaSUser, (req, res) => {
       return res.json({ success: true, message: "Security guard is already inactive." });
     }
     if (!verifyPin(String(pin || ""), dbData.pins[pinIndex].pinHash)) {
+      recordAuthFailure(lockKey);
       return res.status(401).json({ error: "Wrong PIN: Authorization rejected." });
     }
     
+    clearAuthFailures(lockKey);
     dbData.pins.splice(pinIndex, 1);
     writeDB(dbData);
+    recordSecurityAudit("PIN_REMOVED", "INFO", userId, resolveClientIp(req), "Security Shield PIN removed.");
     res.json({ success: true, message: "Active Security Lock PIN terminated." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to remove PIN." });
   }
 });
 
 // J. GROUNDED MITIOR OS HELPER BOT & PERSISTENT USER MEMORY ENDPOINTS
-function resolveAssistantMemoryKey(req: express.Request): {
-  userId: string;
-  userName: string;
-} {
-  const authedId = checkAuth(req);
-  const dbData = readDB();
-  if (authedId) {
-    const foundUser = dbData.users?.find(u => u.id === authedId);
-    return {
-      userId: authedId,
-      userName: foundUser?.name || "Authenticated Operator"
-    };
-  }
-  const fallbackId = String(
-    req.body?.context?.userId || req.query?.userId || "admin-portal-session"
-  ).trim();
-  const fallbackName = String(
-    req.body?.context?.userName || req.query?.userName || "Administrator"
-  ).trim();
-  return {
-    userId: fallbackId || "admin-portal-session",
-    userName: fallbackName || "Administrator"
-  };
-}
-
-app.get("/api/assistant/memory", (req, res) => {
+app.get("/api/assistant/memory", requireLoggedInUser, (req, res) => {
   try {
-    const { userId, userName } = resolveAssistantMemoryKey(req);
+    const authedUser = (req as any).user as UserAccount;
+    const requestedUserId = String(req.query?.userId || "").trim();
+    if (requestedUserId && requestedUserId !== authedUser.id) {
+      recordSecurityAudit(
+        "BOLA_ASSISTANT_MEMORY_BLOCKED",
+        "WARN",
+        authedUser.id,
+        resolveClientIp(req),
+        `Blocked cross-tenant GET /api/assistant/memory attempt targeting ${requestedUserId}`
+      );
+      return res.status(403).json({ error: "Access Denied: Cannot read another tenant's assistant memory." });
+    }
+
     const dbData = readDB();
     dbData.assistantMemories = dbData.assistantMemories || {};
 
-    const existing = dbData.assistantMemories[userId] || {
-      userId,
-      userName,
+    const existing = dbData.assistantMemories[authedUser.id] || {
+      userId: authedUser.id,
+      userName: authedUser.name,
       userRole: "ceo",
       notes: [],
       messages: [],
@@ -1290,7 +1811,7 @@ app.get("/api/assistant/memory", (req, res) => {
       memory: existing
     });
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed to read assistant memory: " + errStr(err) });
+    return res.status(500).json({ error: "Failed to read assistant memory." });
   }
 });
 
@@ -1301,58 +1822,108 @@ app.post("/api/assistant/chat", ipRateLimiter(40, 60 * 1000, "Helper Bot Chat"),
       return res.status(400).json({ error: "Chat message cannot be empty." });
     }
 
-    const { userId, userName } = resolveAssistantMemoryKey(req);
+    const authedId = checkAuth(req);
     const dbData = readDB();
     dbData.assistantMemories = dbData.assistantMemories || {};
+    const requestedContextUserId = String(context?.userId || req.query?.userId || "").trim();
+
+    if (authedId) {
+      if (
+        requestedContextUserId &&
+        requestedContextUserId !== authedId &&
+        requestedContextUserId !== "public-login-gate"
+      ) {
+        recordSecurityAudit(
+          "BOLA_ASSISTANT_CHAT_BLOCKED",
+          "WARN",
+          authedId,
+          resolveClientIp(req),
+          `Blocked cross-tenant POST /api/assistant/chat targeting ${requestedContextUserId}`
+        );
+        return res.status(403).json({ error: "Access Denied: Cannot modify another tenant's assistant memory." });
+      }
+    } else {
+      // Unauthenticated callers can only query stateless public login onboarding help
+      const targetsRegisteredTenant =
+        requestedContextUserId.startsWith("acc-") ||
+        (dbData.users || []).some(u => u.id === requestedContextUserId);
+      if (targetsRegisteredTenant) {
+        recordSecurityAudit(
+          "UNAUTH_ASSISTANT_MEMORY_TARGETING_BLOCKED",
+          "WARN",
+          "anonymous",
+          resolveClientIp(req),
+          `Blocked unauthenticated assistant chat targeting tenant ID ${requestedContextUserId}`
+        );
+        return res.status(401).json({
+          error: "Access Denied: Authentication is required to access or modify tenant assistant memory."
+        });
+      }
+    }
+
+    const foundUser = authedId ? dbData.users?.find(u => u.id === authedId) : undefined;
+    const userId = authedId || "public-login-gate";
+    const userName = foundUser?.name || String(context?.userName || "Visitor").trim();
 
     const runtimeContext: AssistantRuntimeContext = {
       ...(context || {}),
       userId,
-      userName: context?.userName || userName
+      userName
     };
 
-    const existingMemory: AssistantUserMemory = dbData.assistantMemories[userId] || {
-      userId,
-      userName: runtimeContext.userName || userName,
-      userRole: String(runtimeContext.userRole || "ceo"),
-      notes: [],
-      messages: [],
-      updatedAt: Date.now()
-    };
+    const existingMemory: AssistantUserMemory = authedId
+      ? dbData.assistantMemories[userId] || {
+          userId,
+          userName,
+          userRole: String(runtimeContext.userRole || "ceo"),
+          notes: [],
+          messages: [],
+          updatedAt: Date.now()
+        }
+      : {
+          userId: "public-login-gate",
+          userName: "Visitor",
+          userRole: "guest",
+          notes: [],
+          messages: [],
+          updatedAt: Date.now()
+        };
 
     // Update profile metadata in memory
-    existingMemory.userName = runtimeContext.userName || existingMemory.userName;
+    existingMemory.userName = userName || existingMemory.userName;
     existingMemory.userRole = String(runtimeContext.userRole || existingMemory.userRole || "ceo");
 
     const userTurn: AssistantChatMessage = {
-      id: `msg-u-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `msg-u-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
       role: "user",
-      content: String(message).trim(),
+      content: String(message).trim().substring(0, 2000),
       timestamp: new Date().toISOString()
     };
 
     const result = processMitiorAssistantQuery(String(message), runtimeContext, existingMemory);
 
-    if (result.clearedNotes) {
-      existingMemory.notes = [];
-    } else if (result.addedNote && !existingMemory.notes.includes(result.addedNote)) {
-      existingMemory.notes.push(result.addedNote);
+    if (authedId) {
+      if (result.clearedNotes) {
+        existingMemory.notes = [];
+      } else if (result.addedNote && !existingMemory.notes.includes(result.addedNote)) {
+        existingMemory.notes.push(result.addedNote);
+      }
+
+      const assistantTurn: AssistantChatMessage = {
+        id: `msg-a-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
+        role: "assistant",
+        content: result.reply,
+        timestamp: new Date().toISOString(),
+        executedAction: result.executedAction,
+        suggestedActions: result.suggestedActions
+      };
+
+      existingMemory.messages = [...existingMemory.messages, userTurn, assistantTurn].slice(-100);
+      existingMemory.updatedAt = Date.now();
+
+      dbData.assistantMemories[userId] = existingMemory;
+      writeDB(dbData);
     }
-
-    const assistantTurn: AssistantChatMessage = {
-      id: `msg-a-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      role: "assistant",
-      content: result.reply,
-      timestamp: new Date().toISOString(),
-      executedAction: result.executedAction,
-      suggestedActions: result.suggestedActions
-    };
-
-    existingMemory.messages = [...existingMemory.messages, userTurn, assistantTurn].slice(-100);
-    existingMemory.updatedAt = Date.now();
-
-    dbData.assistantMemories[userId] = existingMemory;
-    writeDB(dbData);
 
     return res.json({
       success: true,
@@ -1363,19 +1934,31 @@ app.post("/api/assistant/chat", ipRateLimiter(40, 60 * 1000, "Helper Bot Chat"),
       memory: existingMemory
     });
   } catch (err: any) {
-    return res.status(500).json({ error: "Assistant processing exception: " + errStr(err) });
+    return res.status(500).json({ error: "Assistant processing exception." });
   }
 });
 
-app.delete("/api/assistant/memory", (req, res) => {
+app.delete("/api/assistant/memory", requireLoggedInUser, (req, res) => {
   try {
-    const { userId, userName } = resolveAssistantMemoryKey(req);
+    const authedUser = (req as any).user as UserAccount;
+    const requestedUserId = String(req.query?.userId || req.body?.userId || "").trim();
+    if (requestedUserId && requestedUserId !== authedUser.id) {
+      recordSecurityAudit(
+        "BOLA_ASSISTANT_MEMORY_DELETE_BLOCKED",
+        "WARN",
+        authedUser.id,
+        resolveClientIp(req),
+        `Blocked cross-tenant DELETE /api/assistant/memory attempt targeting ${requestedUserId}`
+      );
+      return res.status(403).json({ error: "Access Denied: Cannot clear another tenant's assistant memory." });
+    }
+
     const dbData = readDB();
     dbData.assistantMemories = dbData.assistantMemories || {};
 
-    dbData.assistantMemories[userId] = {
-      userId,
-      userName,
+    dbData.assistantMemories[authedUser.id] = {
+      userId: authedUser.id,
+      userName: authedUser.name,
       userRole: "ceo",
       notes: [],
       messages: [],
@@ -1386,15 +1969,15 @@ app.delete("/api/assistant/memory", (req, res) => {
     return res.json({
       success: true,
       message: "Helper Bot conversation history and memory cleared for user.",
-      memory: dbData.assistantMemories[userId]
+      memory: dbData.assistantMemories[authedUser.id]
     });
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed to clear assistant memory: " + errStr(err) });
+    return res.status(500).json({ error: "Failed to clear assistant memory." });
   }
 });
 
-// K. ADMIN PORTAL SYSTEM OVERVIEW ENDPOINT
-app.get("/api/admin/overview", requireLoggedInUser, (req, res) => {
+// K. ADMIN PORTAL SYSTEM OVERVIEW & SECURITY AUDIT LOGS ENDPOINTS
+app.get("/api/admin/overview", requireAdminUser, (req, res) => {
   try {
     const dbData = readDB();
     return res.json({
@@ -1405,7 +1988,8 @@ app.get("/api/admin/overview", requireLoggedInUser, (req, res) => {
         activeSyncCodes: (dbData.syncCodes || []).length,
         configuredPins: (dbData.pins || []).length,
         paymentTransactions: (dbData.payments || []).length,
-        activeAssistantMemories: Object.keys(dbData.assistantMemories || {}).length
+        activeAssistantMemories: Object.keys(dbData.assistantMemories || {}).length,
+        securityAuditEvents: (dbData.auditLogs || []).length
       },
       users: (dbData.users || []).map(u => ({
         id: u.id,
@@ -1415,7 +1999,21 @@ app.get("/api/admin/overview", requireLoggedInUser, (req, res) => {
       }))
     });
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed to load admin overview: " + errStr(err) });
+    return res.status(500).json({ error: "Failed to load admin overview." });
+  }
+});
+
+app.get("/api/admin/audit-logs", requireAdminUser, (req, res) => {
+  try {
+    const dbData = readDB();
+    const logs = (dbData.auditLogs || []).slice(-100).reverse();
+    return res.json({
+      success: true,
+      count: logs.length,
+      auditLogs: logs
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to load security audit logs." });
   }
 });
 

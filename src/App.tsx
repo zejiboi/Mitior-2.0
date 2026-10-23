@@ -829,6 +829,16 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    const activeToken = localStorage.getItem('sOS_session_token');
+    if (activeToken) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeToken}`
+        }
+      }).catch(() => {});
+    }
     localStorage.removeItem('sOS_current_account');
     localStorage.removeItem('sOS_workspace_setup_done');
     localStorage.removeItem('sOS_user_role');

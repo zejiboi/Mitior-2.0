@@ -10,3 +10,5 @@ server_db.json
 mitior_db.json
 test_server_db.json
 *.db.json
+*.tmp.*
+~$*
